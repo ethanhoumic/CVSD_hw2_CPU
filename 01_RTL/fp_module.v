@@ -12,7 +12,9 @@ module fp_alu (
     reg        fcvtws_o_invalid_r;
     reg [31:0] o_fp_r;
     assign o_fp      = o_fp_r;
-    assign o_invalid = sub_o_invalid_r || mul_o_invalid_r || fcvtws_o_invalid_r;
+    assign o_invalid = (i_inst == 5'b01010) ? sub_o_invalid_r :
+                       (i_inst == 5'b01011) ? mul_o_invalid_r :
+                       (i_inst == 5'b01100) ? fcvtws_o_invalid_r : 0;
 
     // =============================================== decoding ============================================ //
 
@@ -72,108 +74,142 @@ module fp_alu (
         end
     end
 
-    // ---------------- Normalization ----------------
+    // ... inside SUB calculation always @(*) block ...
+
+    // ---------------- Normalization (Corrected Combinational Logic) ----------------
+    reg [7:0]  sub_exp_temp;
     reg [7:0]  sub_exp_r;
+    reg [24:0] sub_man_temp;
     reg [24:0] sub_man_norm_r;
-    reg stop_r;
-    integer norm;
+    integer    shift_amount;
 
     always @(*) begin
-        stop_r         = 0;
-        sub_exp_r      = exp_large_w;
-        sub_man_norm_r = sub_man_sum_r[24:0];
+        sub_exp_r = 0;
+        sub_man_norm_r = 0;
+        sub_exp_temp   = exp_large_w;
+        sub_man_temp   = sub_man_sum_r[24:0];
+        shift_amount   = 0;
 
+        // Check for zero result first
+        if (sub_man_sum_r == 26'd0) begin
+            sub_exp_temp = 8'd0;
+            sub_man_temp = 25'd0;
+        end
         // Normalize right (overflow from addition)
-        if (sub_man_norm_r[24]) begin
-            sub_man_norm_r = sub_man_norm_r >> 1;
-            sub_exp_r      = sub_exp_r + 1;
+        else if (sub_man_sum_r[25]) begin // Overflow from addition, bit 25 would be set
+            sub_man_temp = sub_man_sum_r[25:1]; // Shift right by 1
+            sub_exp_temp = sub_exp_temp + 1;
         end
-        else begin
-            // Normalize left (result has leading zeros)
-            for (norm = 0; norm < 24; norm = norm + 1) begin
-                if (!stop_r) begin
-                    if (sub_man_norm_r[23] == 0 && sub_exp_r > 0) begin
-                        sub_man_norm_r = sub_man_norm_r << 1;
-                        sub_exp_r      = sub_exp_r - 1;
-                    end
-                    else stop_r = 1;
-                end
-                else begin
-                    
-                end
-            end
+        // Normalize left (result has leading zeros)
+        else if (sub_man_sum_r[24] == 0) begin // Hidden bit is 0, requires left shift
+            // Use a priority case to find the first '1'
+            if (sub_man_temp[23])      shift_amount = 1;
+            else if (sub_man_temp[22]) shift_amount = 2;
+            else if (sub_man_temp[21]) shift_amount = 3;
+            else if (sub_man_temp[20]) shift_amount = 4;
+            else if (sub_man_temp[19]) shift_amount = 5;
+            else if (sub_man_temp[18]) shift_amount = 6;
+            else if (sub_man_temp[17]) shift_amount = 7;
+            else if (sub_man_temp[16]) shift_amount = 8;
+            else if (sub_man_temp[15]) shift_amount = 9;
+            else if (sub_man_temp[14]) shift_amount = 10;
+            else if (sub_man_temp[13]) shift_amount = 11;
+            else if (sub_man_temp[12]) shift_amount = 12;
+            else if (sub_man_temp[11]) shift_amount = 13;
+            else if (sub_man_temp[10]) shift_amount = 14;
+            else if (sub_man_temp[9])  shift_amount = 15;
+            else if (sub_man_temp[8])  shift_amount = 16;
+            else if (sub_man_temp[7])  shift_amount = 17;
+            else if (sub_man_temp[6])  shift_amount = 18;
+            else if (sub_man_temp[5])  shift_amount = 19;
+            else if (sub_man_temp[4])  shift_amount = 20;
+            else if (sub_man_temp[3])  shift_amount = 21;
+            else if (sub_man_temp[2])  shift_amount = 22;
+            else if (sub_man_temp[1])  shift_amount = 23;
+            else if (sub_man_temp[0])  shift_amount = 24;
+            else shift_amount = 25; // Should be all zeros if we reach here, handled by zero check
+            // Perform the shift in one go
+            sub_man_temp = sub_man_temp << shift_amount;
+            sub_exp_temp = sub_exp_temp - shift_amount;
         end
+
+        // Assign to the final registers after all calculations are done
+        sub_man_norm_r = sub_man_temp;
+        sub_exp_r      = sub_exp_temp;
+        
     end
 
     // ---------------- Sticky / Guard / Round computation ----------------
-    // guard: the first bit dropped beyond the 23-bit mantissa (we use sub_man_sum_r[0])
-    // round: the next bit after guard in the sum (sub_man_sum_r[1])
-    // sticky: OR of all bits that were shifted out from the smaller operand during alignment
-    //         (i.e., the lower exp_diff_w bits of the operand that was shifted)
+    // sub_man_norm_r: 25 bits (normalized mantissa including guard bit)
+    // sub_man_sum_r: 26 bits (sum or diff before normalization)
 
-    wire sub_guard_w = sub_man_sum_r[0];        // bit right after the LSB of mantissa
-    wire sub_round_w = sub_man_sum_r[1];        // next bit after guard (if present)
+    wire sub_guard_w = sub_man_norm_r[0];       // bit right after LSB of mantissa
+    wire sub_round_w = sub_man_norm_r[1];       // next bit after guard (if present)
+    wire sub_lsb_w   = sub_man_norm_r[0];       // LSB before rounding
 
-    // compute sticky from the operand that got shifted (the smaller-exponent operand)
-    reg sub_sticky_from_a;
-    reg sub_sticky_from_b;
-    wire sub_sticky_w = sub_sticky_from_a | sub_sticky_from_b;
-    integer i;
+    // Sticky from the shifted operand (smaller exponent)
+    wire sub_sticky_from_a_w;
+    wire sub_sticky_from_b_w;
 
-    // LSB of the rounded mantissa (before rounding)
-    wire sub_lsb_w = sub_man_norm_r[0];
+    genvar j;
+    wire [24:0] sticky_a_bits;
+    wire [24:0] sticky_b_bits;
 
-    // ---------------- Exception Detection (detect BEFORE rounding as requested) ----------------
-    reg [23:0] sub_man_rounded_r; // prepare for possible assignment later
+    generate
+        for (j = 0; j < 25; j = j + 1) begin : gen_sticky_a
+            assign sticky_a_bits[j] = (exp_a_w < exp_b_w && j < exp_diff_w) ? man_a_padded[j] : 1'b0;
+            assign sticky_b_bits[j] = (exp_b_w < exp_a_w && j < exp_diff_w) ? man_b_padded[j] : 1'b0;
+        end
+    endgenerate
+
+    assign sub_sticky_from_a_w = |sticky_a_bits;
+    assign sub_sticky_from_b_w = |sticky_b_bits;
+
+    wire sub_sticky_w        = sub_sticky_from_a_w | sub_sticky_from_b_w;
+
+    // ---------------- Exception Detection & Rounding ----------------
+    reg [23:0] sub_man_rounded_r;
     reg [7:0]  sub_exp_final_r;
 
     always @(*) begin
         sub_o_invalid_r = 1'b0;
-        sub_sticky_from_a = 0;
-        sub_sticky_from_b = 0;
 
-        // If exponent already saturated or zero after normalization → flag and set canonical outputs.
         if (sub_exp_r >= 8'hFF) begin
-            // Overflow -> set to Inf (sign preserved), raise invalid
+            // Overflow -> Inf
             sub_exp_final_r   = 8'hFF;
             sub_man_rounded_r = 24'd0;
-            sub_o_invalid_r       = 1'b1;
+            sub_o_invalid_r   = 1'b1;
         end
         else if (sub_exp_r == 8'h00) begin
-            // Underflow (becoming zero / subnormal handled as zero here), raise invalid
-            sub_exp_final_r   = 8'h00;
-            sub_man_rounded_r = 24'd0;
-            sub_o_invalid_r       = 1'b1;
+            // Underflow -> zero/subnormal
+            if (sub_man_norm_r) begin
+                sub_exp_final_r   = 8'h00;
+                sub_man_rounded_r = 24'd0;
+                sub_o_invalid_r   = 1'b1;
+            end
+            else begin
+                sub_exp_final_r = 0;
+                sub_man_rounded_r = 0;
+            end
         end
         else begin
-            // No exception → proceed to rounding
+            // No exception → rounding
             sub_exp_final_r   = sub_exp_r;
-            sub_man_rounded_r = sub_man_norm_r[23:1]; // truncate: take top 23 bits as mantissa (plus hidden 1)
-            
-            if (exp_a_w < exp_b_w && exp_diff_w != 0) begin
-                for (i = 0; i < exp_diff_w; i = i + 1)
-                    sub_sticky_from_a = sub_sticky_from_a | man_a_padded[i];
-            end
-            else if (exp_b_w < exp_a_w && exp_diff_w != 0) begin
-                for (i = 0; i < exp_diff_w; i = i + 1)
-                    sub_sticky_from_b = sub_sticky_from_b | man_b_padded[i];
-            end
+            sub_man_rounded_r = sub_man_norm_r[23:1]; // top 23 bits
 
-            // IEEE754: round to nearest even using guard/round/sticky/lsb
-            // round-up when guard==1 AND (round==1 OR sticky==1 OR lsb==1)
+            // Round to nearest even
             if (sub_guard_w && (sub_round_w | sub_sticky_w | sub_lsb_w)) begin
                 sub_man_rounded_r = sub_man_rounded_r + 1;
 
-                // mantissa overflow after rounding -> shift right and increment exponent
+                // Mantissa overflow after rounding -> shift right & increment exponent
                 if (sub_man_rounded_r == 24'h800000) begin
                     sub_man_rounded_r = sub_man_rounded_r >> 1;
                     sub_exp_final_r   = sub_exp_final_r + 1;
 
-                    // if rounding caused exponent saturation, signal invalid (overflow)
                     if (sub_exp_final_r >= 8'hFF) begin
                         sub_exp_final_r   = 8'hFF;
                         sub_man_rounded_r = 24'd0;
-                        sub_o_invalid_r       = 1'b1;
+                        sub_o_invalid_r   = 1'b1;
                     end
                 end
             end
@@ -186,7 +222,7 @@ module fp_alu (
     // ========================================== MUL calculation ========================================= //
 
     reg        mul_sign_r;
-    reg [8:0]  mul_exp_r;
+    reg [9:0]  mul_exp_r;
     reg [47:0] mul_man_raw_r;
     reg [23:0] mul_man_norm_r;
     reg [23:0] mul_man_rounded_r;
@@ -198,60 +234,73 @@ module fp_alu (
     wire mul_lsb_w    = mul_man_norm_r[0];
 
     always @(*) begin
-        mul_o_invalid_r = 0;
-        // ---------------- STEP 1: sign & exponent ----------------
-        mul_sign_r = sign_a_w ^ sign_b_w;
-        mul_exp_r  = exp_a_w + exp_b_w - 127;
-
-        // ---------------- STEP 2: 24x24 mantissa multiplication ----------------
-        mul_man_raw_r = man_a_w * man_b_w;  // 48-bit result
-
-        // ---------------- STEP 3: normalization ----------------
-        // If product >= 2.0, shift right 1 and increment exponent
-        if (mul_man_raw_r[47]) begin
-            mul_man_norm_r = mul_man_raw_r[47:24];
-            mul_exp_r = mul_exp_r + 1;
-        end else begin
-            mul_man_norm_r = mul_man_raw_r[46:23];
-        end
-
-        // ---------------- STEP 4: Exception detection (before rounding) ----------------
-        mul_exp_final_r   = mul_exp_r[7:0];
-        mul_man_rounded_r = mul_man_norm_r;
-        mul_o_invalid_r       = 1'b0;
-
-        if (mul_exp_final_r >= 8'hFF) begin
-            // Overflow → Inf
-            mul_exp_final_r   = 8'hFF;
-            mul_man_rounded_r = 24'd0;
-            mul_o_invalid_r       = 1'b1;
-        end
-        else if (mul_exp_final_r <= 0) begin
-            // Underflow → 0
-            mul_exp_final_r   = 8'h00;
-            mul_man_rounded_r = 24'd0;
-            mul_o_invalid_r       = 1'b1;
+        mul_sign_r         = 0;
+        mul_exp_r          = 0;
+        mul_exp_final_r    = 0;
+        mul_man_raw_r      = 0;
+        mul_man_norm_r     = 0;
+        mul_man_rounded_r  = 0;
+        mul_o_invalid_r    = 0;
+        if ((!exp_a_w && !man_a_w) || (!exp_b_w && !man_b_w)) begin
+            mul_sign_r = 0;
+            mul_exp_final_r = 0;
+            mul_man_rounded_r = 0;
         end
         else begin
-            // ---------------- STEP 5: Rounding (Round to Nearest Even) ----------------
-            // guard: next bit after mantissa
-            // round: bit after guard
-            // sticky: OR of all remaining lower bits
+            // ---------------- STEP 1: sign & exponent ----------------
+            mul_sign_r = sign_a_w ^ sign_b_w;
+            mul_exp_r  = exp_a_w + exp_b_w - 127;
 
-            // IEEE754: round to nearest, ties to even
-            if (mul_guard_w && (mul_round_w | mul_sticky_w | mul_lsb_w)) begin
-                mul_man_rounded_r = mul_man_norm_r + 1;
+            // ---------------- STEP 2: 24x24 mantissa multiplication ----------------
+            mul_man_raw_r = man_a_w * man_b_w;  // 48-bit result
 
-                // mantissa overflow after rounding, shift & increment exponent
-                if (mul_man_rounded_r == 24'h800000) begin
-                    mul_man_rounded_r = mul_man_rounded_r >> 1;
-                    mul_exp_final_r   = mul_exp_final_r + 1;
+            // ---------------- STEP 3: normalization ----------------
+            // If product >= 2.0, shift right 1 and increment exponent
+            if (mul_man_raw_r[47]) begin
+                mul_man_norm_r = mul_man_raw_r[47:24];
+                mul_exp_r = mul_exp_r + 1;
+            end else begin
+                mul_man_norm_r = mul_man_raw_r[46:23];
+            end
 
-                    // rounding cause exponent overflow,  raise overflow flag
-                    if (mul_exp_final_r >= 8'hFF) begin
-                        mul_exp_final_r   = 8'hFF;
-                        mul_man_rounded_r = 24'd0;
-                        mul_o_invalid_r       = 1'b1;
+            // ---------------- STEP 4: Exception detection (before rounding) ----------------
+            mul_exp_final_r   = mul_exp_r[7:0];
+            mul_man_rounded_r = mul_man_norm_r;
+            mul_o_invalid_r       = 1'b0;
+
+            if ($signed(mul_exp_r) >= $signed(9'h0FF)) begin
+                // Overflow → Inf
+                mul_exp_final_r   = 8'hFF;
+                mul_man_rounded_r = 24'd0;
+                mul_o_invalid_r   = 1'b1;
+            end
+            else if ($signed(mul_exp_r) <= 0) begin
+                // Underflow → 0
+                mul_exp_final_r   = 8'h00;
+                mul_man_rounded_r = 24'd0;
+                mul_o_invalid_r   = 1'b1;
+            end
+            else begin
+                // ---------------- STEP 5: Rounding (Round to Nearest Even) ----------------
+                // guard: next bit after mantissa
+                // round: bit after guard
+                // sticky: OR of all remaining lower bits
+
+                // IEEE754: round to nearest, ties to even
+                if (mul_guard_w && (mul_round_w | mul_sticky_w | mul_lsb_w)) begin
+                    mul_man_rounded_r = mul_man_norm_r + 1;
+
+                    // mantissa overflow after rounding, shift & increment exponent
+                    if (mul_man_rounded_r == 24'h800000) begin
+                        mul_man_rounded_r = mul_man_rounded_r >> 1;
+                        mul_exp_final_r   = mul_exp_final_r + 1;
+
+                        // rounding cause exponent overflow,  raise overflow flag
+                        if (mul_exp_final_r >= 8'hFF) begin
+                            mul_exp_final_r   = 8'hFF;
+                            mul_man_rounded_r = 24'd0;
+                            mul_o_invalid_r       = 1'b1;
+                        end
                     end
                 end
             end
@@ -269,62 +318,59 @@ module fp_alu (
     reg         [55:0] rounded_r;
     reg  signed [31:0] fcvtws_result_r;
     wire signed [8:0]  fcvtws_exp_w = $signed({1'b0, exp_a_w}) - 127;
-    integer shift_amt;
+    integer shift_amt, i;
     assign fcvtws_result_w = fcvtws_result_r;
 
     always @(*) begin
         fcvtws_result_r = 0;
         fcvtws_o_invalid_r = 0;
 
-        // special cases
         if (exp_a_w == 8'hFF) begin
-            // NaN or Inf
             fcvtws_o_invalid_r = 1;
-            if (man_a_w != 0) begin
-                // NaN
-                fcvtws_result_r = 32'sh7FFFFFFF;
-            end
-            else begin
-                // +Inf / -Inf
-                fcvtws_result_r = sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF;
-            end
+            fcvtws_result_r = (man_a_w != 0) ? 32'sh7FFFFFFF : (sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF);
         end
         else if (fcvtws_exp_w < 0) begin
-            // smaller than 1
             fcvtws_result_r = 0;
         end
         else if (fcvtws_exp_w > 31) begin
-            // overflow
             fcvtws_o_invalid_r = 1;
             fcvtws_result_r = sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF;
         end
         else begin
-
-            mant_ext_r = {1'b1, man_a_w[22:0], 32'b0}; // guarding space
+            mant_ext_r = {1'b1, man_a_w[22:0], 32'b0};
             shift_amt = 32 - fcvtws_exp_w;
+            if (shift_amt < 0) shift_amt = 0;
+            if (shift_amt > 56) shift_amt = 56;
 
             if (shift_amt > 0) begin
-                guard_r   = mant_ext_r[shift_amt - 1];
-                round_r   = (shift_amt > 1) ? mant_ext_r[shift_amt - 2] : 1'b0;
-                sticky_r = 1'b0;
-                for (i = 0; i < shift_amt - 2; i = i + 1) sticky_r = sticky_r | mant_ext_r[i];
+                guard_r = mant_ext_r[shift_amt - 1];
+                round_r = (shift_amt > 1) ? mant_ext_r[shift_amt - 2] : 1'b0;
+
+                sticky_r = 0;
+                if (shift_amt > 2) begin
+                    sticky_r = |mant_ext_r[31:0];
+                end else begin
+                    sticky_r = 0;
+                end
+
                 shifted_r = mant_ext_r >> shift_amt;
-            end
-            else begin
-                guard_r   = 0;
-                round_r   = 0;
-                sticky_r  = 0;
+            end else begin
+                guard_r = 0;
+                round_r = 0;
+                sticky_r = 0;
                 shifted_r = mant_ext_r;
             end
-            // Round to nearest even
-            if (guard_r && (round_r | sticky_r | shifted_r[0])) rounded_r = shifted_r + 1;
-            else rounded_r = shifted_r;
 
-            // leading 32 bits
-            if (sign_a_w) fcvtws_result_r = -$signed(rounded_r[55:24]);
-            else fcvtws_result_r =  $signed(rounded_r[55:24]);
+            // round to nearest even
+            if (guard_r && (round_r | sticky_r | shifted_r[0]))
+                rounded_r = shifted_r + 1;
+            else
+                rounded_r = shifted_r;
+
+            fcvtws_result_r = sign_a_w ? -$signed(rounded_r[55:24]) : $signed(rounded_r[55:24]);
         end
     end
+
 
     // ======================================== FCLASS calculation ===================================== //
 
@@ -332,9 +378,12 @@ module fp_alu (
     assign fclass_result_w = fclass_result_r;
 
     always @(*) begin
-        if (exp_a_w == 255) begin 
-            if (!man_a_w) fclass_result_r = (man_a_w[22]) ? 512 : 256; // Quiet NaN; Signal NaN
-            else fclass_result_r = (sign_a_w) ? 1 : 128; // -INF; +INF 
+        if (exp_a_w == 8'hFF) begin // Special case: Inf or NaN
+            if (man_a_w[22:0] != 23'd0) begin // NaN if mantissa is non-zero
+                fclass_result_r = (man_a_w[22]) ? 32'd512 : 32'd256; // Quiet NaN (MSB=1) vs Signaling NaN (MSB=0)
+            end else begin // Infinity if mantissa is zero
+                fclass_result_r = (sign_a_w) ? 32'd1 : 32'd128; // -Infinity vs +Infinity
+            end
         end
         else if (!exp_a_w) begin 
             if (!man_a_w) fclass_result_r = (sign_a_w) ? 8 : 16; // -0; +0
