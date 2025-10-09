@@ -312,10 +312,10 @@ module fp_alu (
 
     // ====================================== FCVTWS calculation ========================================== //
 
-    reg         [55:0] mant_ext_r;
-    reg         [55:0] shifted_r;
+    reg         [63:0] mant_ext_r;
+    reg         [63:0] shifted_r;
     reg                guard_r, round_r, sticky_r;
-    reg         [55:0] rounded_r;
+    reg         [63:0] rounded_r;
     reg  signed [31:0] fcvtws_result_r;
     wire signed [8:0]  fcvtws_exp_w = $signed({1'b0, exp_a_w}) - 127;
     integer shift_amt, i;
@@ -327,7 +327,7 @@ module fp_alu (
 
         if (exp_a_w == 8'hFF) begin
             fcvtws_o_invalid_r = 1;
-            fcvtws_result_r = (man_a_w != 0) ? 32'sh7FFFFFFF : (sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF);
+            fcvtws_result_r = (man_a_w[22:0] != 23'd0) ? 32'sh7FFFFFFF : (sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF);
         end
         else if (fcvtws_exp_w < 0) begin
             fcvtws_result_r = 0;
@@ -337,37 +337,47 @@ module fp_alu (
             fcvtws_result_r = sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF;
         end
         else begin
-            mant_ext_r = {1'b1, man_a_w[22:0], 32'b0};
-            shift_amt = 32 - fcvtws_exp_w;
-            if (shift_amt < 0) shift_amt = 0;
-            if (shift_amt > 56) shift_amt = 56;
+            mant_ext_r = {8'b0, 1'b1, man_a_w[22:0], 32'b0}; // 56 bits total
+            shift_amt = 55 - fcvtws_exp_w;
 
-            if (shift_amt > 0) begin
-                guard_r = mant_ext_r[shift_amt - 1];
-                round_r = (shift_amt > 1) ? mant_ext_r[shift_amt - 2] : 1'b0;
-
-                sticky_r = 0;
-                if (shift_amt > 2) begin
-                    sticky_r = |mant_ext_r[31:0];
-                end else begin
-                    sticky_r = 0;
-                end
-
-                shifted_r = mant_ext_r >> shift_amt;
-            end else begin
+            if (shift_amt <= 0) begin
+                // No shift needed (large exponent)
                 guard_r = 0;
                 round_r = 0;
                 sticky_r = 0;
                 shifted_r = mant_ext_r;
+            end 
+            else if (shift_amt >= 56) begin
+                // Shift everything out (very small number)
+                guard_r = 0;
+                round_r = 0;
+                sticky_r = 0;
+                shifted_r = 0;
+            end 
+            else begin
+                // Normal shift
+                shifted_r = mant_ext_r >> shift_amt;
+                
+                // Extract guard bit (first bit shifted out)
+                guard_r = mant_ext_r[shift_amt - 1];
+                
+                // Extract round bit (second bit shifted out)
+                round_r = (shift_amt > 1) ? mant_ext_r[shift_amt - 2] : 1'b0;
+                
+                // Sticky = OR of all bits below round bit
+                sticky_r = 0;
+                for (i = 0; i < shift_amt - 2 && i < 56; i = i + 1) begin
+                    sticky_r = sticky_r | mant_ext_r[i];
+                end
             end
 
-            // round to nearest even
-            if (guard_r && (round_r | sticky_r | shifted_r[0]))
-                rounded_r = shifted_r + 1;
-            else
-                rounded_r = shifted_r;
+            // Round to nearest even
+            if (guard_r && (round_r | sticky_r | shifted_r[0])) rounded_r = shifted_r + 1;
+            else rounded_r = shifted_r;
 
-            fcvtws_result_r = sign_a_w ? -$signed(rounded_r[55:24]) : $signed(rounded_r[55:24]);
+            // Convert to signed integer
+            if (sign_a_w) fcvtws_result_r = -$signed(rounded_r[31:0]);
+            else fcvtws_result_r = $signed(rounded_r[31:0]);
         end
     end
 
