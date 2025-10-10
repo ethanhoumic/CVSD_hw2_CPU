@@ -17,10 +17,10 @@ module fp_alu_tb;
 
     // Instantiate DUT
     fp_alu dut (
-        .i_data_a(i_data_a),
-        .i_data_b(i_data_b),
-        .i_inst(i_inst),
-        .o_fp(o_fp),
+        .i_data_r1(i_data_a),
+        .i_data_r2(i_data_b),
+        .i_alu_ctrl(i_inst),
+        .o_data(o_fp),
         .o_invalid(o_invalid)
     );
 

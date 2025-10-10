@@ -1,9 +1,9 @@
 
 module fp_alu (
-    input  [31:0] i_data_a,
-    input  [31:0] i_data_b,
-    input  [4:0]  i_inst,
-    output [31:0] o_fp,
+    input  [31:0] i_data_r1,
+    input  [31:0] i_data_r2,
+    input  [4:0]  i_alu_ctrl,
+    output [31:0] o_data,
     output        o_invalid
 );
 
@@ -11,19 +11,19 @@ module fp_alu (
     reg        mul_o_invalid_r;
     reg        fcvtws_o_invalid_r;
     reg [31:0] o_fp_r;
-    assign o_fp      = o_fp_r;
-    assign o_invalid = (i_inst == 5'b01010) ? sub_o_invalid_r :
-                       (i_inst == 5'b01011) ? mul_o_invalid_r :
-                       (i_inst == 5'b01100) ? fcvtws_o_invalid_r : 0;
+    assign o_data      = o_fp_r;
+    assign o_invalid = (i_alu_ctrl == 5'b01010) ? sub_o_invalid_r :
+                       (i_alu_ctrl == 5'b01011) ? mul_o_invalid_r :
+                       (i_alu_ctrl == 5'b01100) ? fcvtws_o_invalid_r : 0;
 
     // =============================================== decoding ============================================ //
 
-    wire        sign_a_w  = i_data_a[31];
-    wire        sign_b_w  = i_data_b[31];
-    wire [7:0]  exp_a_w   = i_data_a[30:23];
-    wire [7:0]  exp_b_w   = i_data_b[30:23];
-    wire [23:0] man_a_w   = (exp_a_w == 8'd0) ? {1'b0, i_data_a[22:0]} : {1'b1, i_data_a[22:0]};
-    wire [23:0] man_b_w   = (exp_b_w == 8'd0) ? {1'b0, i_data_b[22:0]} : {1'b1, i_data_b[22:0]};
+    wire        sign_a_w  = i_data_r1[31];
+    wire        sign_b_w  = i_data_r2[31];
+    wire [7:0]  exp_a_w   = i_data_r1[30:23];
+    wire [7:0]  exp_b_w   = i_data_r2[30:23];
+    wire [23:0] man_a_w   = (exp_a_w == 8'd0) ? {1'b0, i_data_r1[22:0]} : {1'b1, i_data_r1[22:0]};
+    wire [23:0] man_b_w   = (exp_b_w == 8'd0) ? {1'b0, i_data_r2[22:0]} : {1'b1, i_data_r2[22:0]};
 
     wire        [31:0] sub_result_w;
     wire        [31:0] mul_result_w;
@@ -33,7 +33,7 @@ module fp_alu (
     // ========================================== output selection ======================================== //
 
     always @(*) begin
-        case (i_inst)
+        case (i_alu_ctrl)
             5'b01010: o_fp_r = sub_result_w;
             5'b01011: o_fp_r = mul_result_w;
             5'b01100: o_fp_r = fcvtws_result_w;
