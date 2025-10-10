@@ -14,3 +14,4 @@
 // design files: Be free to add your design files
 // -----------------------------------------------------------------------------
 ./core.v
+./fp_module.v

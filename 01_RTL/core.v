@@ -132,7 +132,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     assign o_we            = o_we_r;
     assign o_addr          = o_addr_r;
     assign o_wdata         = o_wdata_r;
-    assign write_fp_en_w = (state_r == S_WRITE) && (type_r != 2) && (type_r != 3) && 
+    assign write_fp_en_w   = (state_r == S_WRITE) && (type_r != 2) && (type_r != 3) && 
                            ((alu_ctrl_r == 5'b01010) || (alu_ctrl_r == 5'b01011) || (alu_ctrl_r == 5'b01101));
     assign branch_target_w = pc_w + imm_w;
     assign jalr_target_w   = alu_output_w & (~32'h1);
@@ -188,9 +188,9 @@ module core #( // DO NOT MODIFY INTERFACE!!!
             state_r <= next_state_r;
             case (state_r)
                 S_IDLE: begin
-                    o_we_r   <= 0;
-                    o_addr_r <= pc_w;
-                    pc_gen_r <= 0;
+                    o_we_r           <= 0;
+                    o_addr_r         <= pc_w;
+                    pc_gen_r         <= 0;
                     o_status_valid_r <= 0;
                 end 
                 S_FETCH: begin
@@ -210,7 +210,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                 S_ALU: begin
                     alu_output_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
                     if (invalid_w || fp_invalid_w) begin
-                        type_r <= 5;
+                        type_r           <= 5;
                         o_status_valid_r <= 1;
                     end
                     else begin
@@ -220,13 +220,13 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                             o_wdata_r <= rs2_data_w;
                         end
                         else if (is_load_w) begin
-                            o_we_r    <= 0;
+                            o_we_r   <= 0;
                             o_data_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
                         end
                     end
                 end
                 S_WRITE: begin
-                    o_we_r <= 0;
+                    o_we_r           <= 0;
                     o_status_valid_r <= 1;
                     
                     // Load operations - get data from memory
@@ -297,12 +297,12 @@ module register_file (
     always @(posedge i_clk or negedge i_rst_n) begin
         if (!i_rst_n) begin
             for (i = 0; i < 32; i = i + 1) begin
-                x_r[i] <= 0;
+                x_r[i]  <= 0;
                 fp_r[i] <= 0;
             end
         end
         else begin
-            if (i_write_en) x_r[i_rd_addr] <= i_rd_data;
+            if (i_write_en) x_r[i_rd_addr]     <= i_rd_data;
             if (i_write_fp_en) fp_r[i_rd_addr] <= i_rd_data;
         end
     end
