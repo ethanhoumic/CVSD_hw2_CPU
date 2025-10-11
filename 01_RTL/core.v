@@ -57,7 +57,8 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     wire        write_en_w;
     wire        invalid_w;
     wire        fp_invalid_w;
-    wire        read_fp_en_w;
+    wire        read_fp_1_en_w;
+    wire        read_fp_2_en_w;
     wire        write_fp_en_w;
     wire [2:0]  type_w;
     wire [4:0]  rs1_addr_w;
@@ -94,14 +95,16 @@ module core #( // DO NOT MODIFY INTERFACE!!!
         .o_rs2_addr(rs2_addr_w),
         .o_rd_addr(rd_addr_w),
         .o_imm_en(imm_en_w),
-        .o_fp_en(read_fp_en_w)
+        .o_fp_1_en(read_fp_1_en_w),
+        .o_fp_2_en(read_fp_2_en_w)
     );
 
     register_file reg_file(
         .i_clk(i_clk),
         .i_rst_n(i_rst_n),
-        .i_read_fp_en(read_fp_en_w),
-        .i_write_fp_en(write_fp_en_w),
+        .i_read_fp_1_en(read_fp_1_en_w),
+        .i_read_fp_2_en(read_fp_2_en_w),
+        .i_write_fp_en(write_fp_en_w || (is_fp_load_w && state_r == S_IDLE && ~write_en_w)),
         .i_rs1_addr(rs1_addr_w),
         .i_rs2_addr(rs2_addr_w),
         .i_rd_addr(rd_addr_r),
@@ -217,7 +220,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     end
                 end
                 S_ALU: begin
-                    alu_output_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
+                    alu_output_r <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
                     if (invalid_w || fp_invalid_w) begin
                         type_r           <= 5;
                         o_status_valid_r <= 1;
@@ -225,12 +228,12 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     else begin
                         if (type_r == 2) begin
                             o_we_r    <= 1;
-                            o_addr_r  <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
+                            o_addr_r  <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
                             o_wdata_r <= rs2_data_w;
                         end
                         else if (is_load_w || is_fp_load_w) begin
                             o_we_r   <= 0;
-                            o_addr_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
+                            o_addr_r <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
                         end
                     end
                 end
@@ -284,7 +287,8 @@ endmodule
 module register_file (
     input         i_clk,
     input         i_rst_n,
-    input         i_read_fp_en,
+    input         i_read_fp_1_en,
+    input         i_read_fp_2_en,
     input         i_write_fp_en,
     input [4:0]   i_rs1_addr,
     input [4:0]   i_rs2_addr,
@@ -300,8 +304,8 @@ module register_file (
     reg [31:0] fp_r [0:31];
     integer i;
 
-    assign o_rs1_data = (i_read_fp_en) ? fp_r[i_rs1_addr] : x_r[i_rs1_addr];
-    assign o_rs2_data = (i_read_fp_en) ? fp_r[i_rs2_addr] : x_r[i_rs2_addr];
+    assign o_rs1_data = (i_read_fp_1_en) ? fp_r[i_rs1_addr] : x_r[i_rs1_addr];
+    assign o_rs2_data = (i_read_fp_2_en) ? fp_r[i_rs2_addr] : x_r[i_rs2_addr];
 
     always @(posedge i_clk or negedge i_rst_n) begin
         if (!i_rst_n) begin
@@ -354,7 +358,8 @@ module control_unit (
     output [4:0]  o_rs2_addr,
     output [4:0]  o_rd_addr,
     output        o_imm_en,
-    output        o_fp_en
+    output        o_fp_1_en,
+    output        o_fp_2_en
 );
     reg  [2:0]  o_type_r;
     reg  [4:0]  o_alu_ctrl_r;
@@ -362,7 +367,8 @@ module control_unit (
     reg  [4:0]  o_rs2_addr_r;
     reg  [4:0]  o_rd_addr_r;
     reg  [31:0] o_imm_r;
-    reg         o_fp_en_r;
+    reg         o_fp_1_en_r;
+    reg         o_fp_2_en_r;
     reg         o_imm_en_r;
     wire [6:0]  i_op     = i_inst[6:0];
     wire [6:0]  i_funct7 = i_inst[31:25];
@@ -374,7 +380,8 @@ module control_unit (
     assign o_rs2_addr = o_rs2_addr_r;
     assign o_rd_addr  = o_rd_addr_r;
     assign o_imm_en   = o_imm_en_r;
-    assign o_fp_en    = o_fp_en_r;
+    assign o_fp_1_en  = o_fp_1_en_r;
+    assign o_fp_2_en  = o_fp_2_en_r;
     assign o_imm      = o_imm_r;
 
     always @(*) begin
@@ -382,7 +389,8 @@ module control_unit (
         o_rs1_addr_r = 0;
         o_rs2_addr_r = 0;
         o_imm_r      = 0;
-        o_fp_en_r    = 0;
+        o_fp_1_en_r  = 0;
+        o_fp_2_en_r  = 0;
         o_imm_en_r   = 0;
         o_rd_addr_r  = 0;
         case (i_op)
@@ -457,7 +465,8 @@ module control_unit (
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
                 o_rd_addr_r  = i_inst[11:7];
-                o_fp_en_r    = 1;
+                o_fp_1_en_r  = 1;
+                o_fp_2_en_r  = 1;
                 o_type_r     = 0;
             end
             `OP_FLW: begin
@@ -466,7 +475,8 @@ module control_unit (
                 o_imm_r      = {{20{i_inst[31]}}, i_inst[31:20]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rd_addr_r  = i_inst[11:7];
-                o_fp_en_r    = 0;
+                o_fp_1_en_r  = 0;
+                o_fp_1_en_r  = 0;
                 o_type_r     = 1;
             end
             `OP_FSW: begin 
@@ -475,7 +485,8 @@ module control_unit (
                 o_imm_r      = {{20{i_inst[31]}}, i_inst[31:25], i_inst[11:7]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
-                o_fp_en_r    = 0;
+                o_fp_1_en_r  = 0;
+                o_fp_2_en_r  = 1;
                 o_type_r     = 2;
             end
             `OP_EOF: begin
