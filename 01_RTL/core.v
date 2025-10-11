@@ -27,6 +27,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     localparam S_WRITE  = 3'b100;
     localparam S_PCGEN  = 3'b101;
     localparam S_END    = 3'b110;
+    localparam S_BUFF   = 3'b111;
 
 // ---------------------------------------------------------------------------
 // Wires and Registers
@@ -70,6 +71,8 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     wire [31:0] pc_w;
     wire [31:0] imm_w;
     wire [31:0] alu_data2_w = (imm_en_w) ? imm_w : rs2_data_w;
+    wire        is_load_w    = alu_ctrl_w == 5'b00010;
+    wire        is_fp_load_w = alu_ctrl_w == 5'b01101;
 
     program_counter pc(
         .i_clk(i_clk),
@@ -103,12 +106,13 @@ module core #( // DO NOT MODIFY INTERFACE!!!
         .i_rs2_addr(rs2_addr_w),
         .i_rd_addr(rd_addr_r),
         .i_rd_data(rd_data_r),
-        .i_write_en(write_en_w),
+        .i_write_en(write_en_w || (is_load_w && state_r == S_IDLE && ~write_fp_en_w)),
         .o_rs1_data(rs1_data_w),
         .o_rs2_data(rs2_data_w)
     );
 
     alu alu(
+        .i_pc(pc_w),
         .i_data_r1(rs1_data_w), 
         .i_data_r2(alu_data2_w), 
         .i_alu_ctrl(alu_ctrl_r), 
@@ -132,11 +136,11 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     assign o_we            = o_we_r;
     assign o_addr          = o_addr_r;
     assign o_wdata         = o_wdata_r;
-    assign write_fp_en_w   = (state_r == S_WRITE) && (type_r != 2) && (type_r != 3) && 
+    assign write_fp_en_w   = (state_r == S_PCGEN) && (type_r != 2) && (type_r != 3) && 
                            ((alu_ctrl_r == 5'b01010) || (alu_ctrl_r == 5'b01011) || (alu_ctrl_r == 5'b01101));
     assign branch_target_w = pc_w + imm_w;
     assign jalr_target_w   = alu_output_w & (~32'h1);
-    assign write_en_w      = (state_r == S_ALU) && (type_r != 2) && (type_r != 3) && ~write_fp_en_w;
+    assign write_en_w      = (state_r == S_PCGEN) && (type_r != 2) && (type_r != 3) && ~write_fp_en_w;
     assign o_status        = type_r;
     assign o_status_valid  = o_status_valid_r;
 
@@ -148,12 +152,13 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     always @(*) begin
         next_state_r = state_r;
         case (state_r)
-            S_IDLE:   next_state_r = S_FETCH;
+            S_IDLE:   next_state_r = S_BUFF;
+            S_BUFF:   next_state_r = S_FETCH;
             S_FETCH:  next_state_r = S_DECODE;
             S_DECODE: next_state_r = S_ALU;
             S_ALU:    next_state_r = S_WRITE;
             S_WRITE:  next_state_r = S_PCGEN;
-            S_PCGEN:  next_state_r = (is_eof || type_r == 6) ? S_END : S_FETCH;
+            S_PCGEN:  next_state_r = (is_eof || type_r == 6) ? S_END : S_IDLE;
             S_END:    next_state_r = S_END;
             default:  next_state_r = S_IDLE;
         endcase
@@ -193,8 +198,12 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     pc_gen_r         <= 0;
                     o_status_valid_r <= 0;
                 end 
+                S_BUFF: begin
+                    
+                end
                 S_FETCH: begin
                     inst_r <= i_rdata;
+                    pc_gen_r <= 0;
                 end
                 S_DECODE: begin
                     if (alu_ctrl_w == 5'b10000) begin
@@ -204,7 +213,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     else begin
                         alu_ctrl_r <= alu_ctrl_w;
                         rd_addr_r  <= rd_addr_w;   
-                        type_r     <= type_w;        
+                        type_r     <= type_w;
                     end
                 end
                 S_ALU: begin
@@ -219,9 +228,9 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                             o_addr_r  <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
                             o_wdata_r <= rs2_data_w;
                         end
-                        else if (is_load_w) begin
+                        else if (is_load_w || is_fp_load_w) begin
                             o_we_r   <= 0;
-                            o_data_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
+                            o_addr_r <= (read_fp_en_w) ? fp_alu_output_w : alu_output_w;
                         end
                     end
                 end
@@ -229,22 +238,15 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     o_we_r           <= 0;
                     o_status_valid_r <= 1;
                     
-                    // Load operations - get data from memory
-                    if (is_load_w) begin
-                        rd_data_r <= i_rdata;
-                    end
-                    // Other operations that write to register
-                    else if (type_r != 2 && type_r != 3) begin
-                        rd_data_r <= alu_output_r;
-                    end
                     // JALR stores PC+4
-                    else if (alu_ctrl_r == 5'b00110) begin
+                    if (alu_ctrl_r == 5'b00110) begin
                         rd_data_r <= pc_w + 4;
                     end
-                end
-                S_PCGEN: begin
-                    pc_gen_r         <= 1;
-                    o_status_valid_r <= 0;
+                    // Other operations that write to register
+                    else if (type_r != 2 && type_r != 3 && !is_load_w && !is_fp_load_w) begin
+                        rd_data_r <= alu_output_r;
+                    end
+                    pc_gen_r <= 1;
                     // Branch logic
                     if (type_r == 3) begin
                         branch_taken_r  <= alu_output_r[0];
@@ -263,9 +265,16 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                         jalr_taken_r <= 0;
                     end
                 end
+                S_PCGEN: begin
+                    // Load operations - get data from memory
+                    if (is_load_w || is_fp_load_w) begin
+                        rd_data_r <= i_rdata;
+                    end
+                    o_status_valid_r <= 0;
+                    pc_gen_r <= 0;
+                end
                 S_END: begin
                     o_status_valid_r <= 1;
-                    pc_gen_r <= 0;
                 end
             endcase
         end
@@ -382,7 +391,7 @@ module control_unit (
                     `FUNCT3_SUB: o_alu_ctrl_r = 5'b00000;
                     `FUNCT3_SLT: o_alu_ctrl_r = 5'b01000;
                     `FUNCT3_SRL: o_alu_ctrl_r = 5'b01001;
-                    default: o_alu_ctrl = 5'b11111; // error code
+                    default: o_alu_ctrl_r = 5'b11111; // error code
                 endcase
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
@@ -392,7 +401,7 @@ module control_unit (
             `OP_ADDI: begin
                 o_alu_ctrl_r = 5'b00001;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:20]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:20]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rd_addr_r  = i_inst[11:7];
                 o_type_r     = 1;
@@ -400,7 +409,7 @@ module control_unit (
             `OP_LW: begin 
                 o_alu_ctrl_r = 5'b00010;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:20]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:20]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rd_addr_r  = i_inst[11:7];
                 o_type_r     = 1;
@@ -408,7 +417,7 @@ module control_unit (
             `OP_SW: begin
                 o_alu_ctrl_r = 5'b00011;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:25], i_inst[11:7]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:25], i_inst[11:7]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
                 o_type_r     = 2;
@@ -416,8 +425,8 @@ module control_unit (
             `OP_BEQ, `OP_BLT: begin
                 if (i_funct3 == `FUNCT3_BEQ) o_alu_ctrl_r = 5'b00100;
                 else o_alu_ctrl_r = 5'b00101;
-                o_imm_en_r   = 1;
-                o_imm_r      = {19{i_inst[31]}, i_inst[7], i_inst[30:25], i_inst[11:8], 1'b0};
+                o_imm_en_r   = 0;
+                o_imm_r      = {{19{i_inst[31]}}, i_inst[7], i_inst[30:25], i_inst[11:8], 1'b0};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
                 o_type_r     = 3;
@@ -425,7 +434,7 @@ module control_unit (
             `OP_JALR: begin
                 o_alu_ctrl_r = 5'b00110;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:20]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:20]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rd_addr_r  = i_inst[11:7];
                 o_type_r     = 1;
@@ -443,7 +452,7 @@ module control_unit (
                     `FUNCT7_FMUL:   o_alu_ctrl_r = 5'b01011;
                     `FUNCT7_FCVTWS: o_alu_ctrl_r = 5'b01100;
                     `FUNCT7_FCLASS: o_alu_ctrl_r = 5'b01111;
-                    default: o_alu_ctrl = 5'b11111; // error code
+                    default: o_alu_ctrl_r = 5'b11111; // error code
                 endcase
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
@@ -454,19 +463,19 @@ module control_unit (
             `OP_FLW: begin
                 o_alu_ctrl_r = 5'b01101;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:20]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:20]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rd_addr_r  = i_inst[11:7];
-                o_fp_en_r    = 1;
+                o_fp_en_r    = 0;
                 o_type_r     = 1;
             end
             `OP_FSW: begin 
                 o_alu_ctrl_r = 5'b01110;
                 o_imm_en_r   = 1;
-                o_imm_r      = {20{i_inst[31]}, i_inst[31:25], i_inst[11:7]};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[31:25], i_inst[11:7]};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
-                o_fp_en_r    = 1;
+                o_fp_en_r    = 0;
                 o_type_r     = 2;
             end
             `OP_EOF: begin
@@ -480,6 +489,7 @@ module control_unit (
 endmodule
 
 module alu (
+    input         [31:0] i_pc,
     input  signed [31:0] i_data_r1,
     input  signed [31:0] i_data_r2,              // imm is always here
     input         [4:0]  i_alu_ctrl,
@@ -506,7 +516,7 @@ module alu (
             5'b00100: o_data_r = {{31{1'b0}}, (i_data_r1 == i_data_r2)};   // BEQ
             5'b00101: o_data_r = {{31{1'b0}}, (i_data_r1 < i_data_r2)};    // BLT
             5'b00110: o_data_r = addi_w[31:0];                             // JALR
-            5'b00111: o_data_r = i_data_r1 + i_data_r2;                    // AUIPC
+            5'b00111: o_data_r = i_pc + i_data_r2;                         // AUIPC
             5'b01000: o_data_r = {{31{1'b0}}, (i_data_r1 < i_data_r2)};    // SLT
             5'b01001: o_data_r = ($unsigned(i_data_r1) >> i_data_r2[4:0]); // SRL
             // 5'b01010: o_data_r = fp_sub(i_data_r1, i_data_r2);          // FSUB
