@@ -233,24 +233,24 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     end
                     else begin
                         if (type_r == 2) begin
-                            if ((read_fp_1_en_w && fp_alu_output_w < 32'sd4096) || (!read_fp_1_en_w && alu_output_w < 32'sd4096)) begin
+                            if (alu_output_w < 32'sd4096 || alu_output_w > 32'sd8191) begin
                                 type_r <= 5;
                                 o_status_valid_r <= 1;
                             end
                             else begin
                                 o_we_r    <= 1;
-                                o_addr_r  <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
+                                o_addr_r  <= alu_output_w;
                                 o_wdata_r <= rs2_data_w;
                             end
                         end
                         else if (is_load_w || is_fp_load_w) begin
-                            if ((read_fp_1_en_w && fp_alu_output_w < 32'sd4096) || (!read_fp_1_en_w && alu_output_w < 32'sd4096)) begin
+                            if (alu_output_w < 32'sd4096 || alu_output_w > 32'sd8191) begin
                                 type_r <= 5;
                                 o_status_valid_r <= 1;
                             end
                             else begin
                                 o_we_r   <= 0;
-                                o_addr_r <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
+                                o_addr_r <= alu_output_w;
                             end
                         end
                     end
@@ -258,7 +258,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                 S_WRITE: begin
                     o_we_r           <= 0;
                     o_status_valid_r <= 1;
-                    
+                    pc_gen_r <= 1;
                     // JALR stores PC+4
                     if (alu_ctrl_r == 5'b00110) begin
                         rd_data_r <= pc_w + 4;
@@ -267,11 +267,15 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     else if (type_r != 2 && type_r != 3 && !is_load_w && !is_fp_load_w) begin
                         rd_data_r <= alu_output_r;
                     end
-                    pc_gen_r <= 1;
                     // Branch logic
-                    if (type_r == 3) begin
-                        branch_taken_r  <= alu_output_r[0];
-                        branch_target_r <= pc_w + imm_w;
+                    if (alu_ctrl_r == 5'b00100 || alu_ctrl_r == 5'b00101) begin
+                        if (alu_output_r[0] && (($signed(pc_w + imm_w) > 32'sd4095) || ($signed(pc_w + imm_w) < 32'sd0))) begin
+                            type_r <= 5;
+                        end
+                        else begin
+                            branch_taken_r  <= alu_output_r[0];
+                            branch_target_r <= pc_w + imm_w;
+                        end
                     end
                     else begin
                         branch_taken_r <= 0;
@@ -279,8 +283,13 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     
                     // JALR logic
                     if (alu_ctrl_r == 5'b00110) begin
-                        jalr_taken_r  <= 1;
-                        jalr_target_r <= alu_output_r & (~32'h1);
+                        if (($signed(alu_output_r & (~32'h1)) > 32'sd4095) || $signed(alu_output_r & (~32'h1)) < 32'sd0) begin
+                            type_r <= 5;
+                        end
+                        else begin
+                            jalr_taken_r  <= 1;
+                            jalr_target_r <= alu_output_r & (~32'h1);
+                        end
                     end
                     else begin
                         jalr_taken_r <= 0;
