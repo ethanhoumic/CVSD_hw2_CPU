@@ -1,4 +1,4 @@
-module fp_alu (
+module fp_module (
     input  [31:0] i_data_r1,
     input  [31:0] i_data_r2,
     input  [4:0]  i_alu_ctrl,
@@ -222,7 +222,7 @@ module fp_alu (
         mul_o_invalid_r    = 0;
         mul_man_norm_r     = 0;
         
-        if ((!exp_a_w && !man_a_w) || (!exp_b_w && !man_b_w)) begin
+        if ((~|exp_a_w && ~|man_a_w) || (~|exp_b_w && ~|man_b_w)) begin
             // Zero result
             mul_sign_r = 0;
             mul_exp_final_r = 0;
@@ -400,8 +400,8 @@ module fp_alu (
                 fclass_result_r = (sign_a_w) ? 32'd1 : 32'd128;
             end
         end
-        else if (!exp_a_w) begin 
-            if (!man_a_w[22:0]) fclass_result_r = (sign_a_w) ? 32'd8 : 32'd16;
+        else if (~|exp_a_w) begin 
+            if (~|man_a_w[22:0]) fclass_result_r = (sign_a_w) ? 32'd8 : 32'd16;
             else fclass_result_r = (sign_a_w) ? 32'd4 : 32'd32;
         end
         else begin
