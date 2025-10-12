@@ -204,14 +204,16 @@ module fp_module (
     // ========================================== MUL calculation ========================================= //
 
     reg         mul_sign_r;
+    reg         mul_sticky_r;
     reg  [9:0]  mul_exp_r;
     reg  [47:0] mul_man_raw_r;
     reg  [22:0] mul_man_rounded_r;
     reg  [7:0]  mul_exp_final_r;
     reg  [26:0] mul_man_norm_r;  // 24 bits mantissa + 3 bits GRS
-    wire [2:0]  mul_grs_w = mul_man_norm_r[2:0];
+    wire [2:0]  mul_grs_w = {mul_man_norm_r[2:1], mul_sticky_r};
 
     always @(*) begin
+        mul_sticky_r       = 0;
         mul_sign_r         = 0;
         mul_exp_r          = 0;
         mul_exp_final_r    = 0;
@@ -243,9 +245,11 @@ module fp_module (
             
             if (mul_man_raw_r[47]) begin
                 mul_man_norm_r = mul_man_raw_r[47:21];  // Take top 27 bits
+                mul_sticky_r = |mul_man_raw_r[20:0];
                 mul_exp_r = mul_exp_r + 1;
             end else begin
                 mul_man_norm_r = mul_man_raw_r[46:20];  // Take top 27 bits (shifted left by 1)
+                mul_sticky_r = | mul_man_raw_r[19:0];
             end
 
             // ---------------- STEP 4: Exception detection (before rounding) ----------------
@@ -325,9 +329,13 @@ module fp_module (
         else if (fcvtws_exp_w < -1) begin
             fcvtws_result_r = 0;
         end
-        else if (fcvtws_exp_w > 30) begin
+        else if (fcvtws_exp_w > 30 && !sign_a_w) begin
             fcvtws_o_invalid_r = 1;
-            fcvtws_result_r = sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF;
+            fcvtws_result_r = 32'sh7FFFFFFF;
+        end
+        else if (fcvtws_exp_w > 31 && sign_a_w) begin
+            fcvtws_o_invalid_r = 1;
+            fcvtws_result_r = 32'h80000000;
         end
         else begin
             mant_ext_r = {8'b0, 1'b1, man_a_w[22:0], 32'b0}; // 64 bits total
