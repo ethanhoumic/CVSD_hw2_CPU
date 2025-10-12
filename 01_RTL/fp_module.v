@@ -7,12 +7,14 @@ module fp_module (
 );
 
     reg        sub_o_invalid_r;
+    reg        sub_num_invalid_r;
     reg        mul_o_invalid_r;
+    reg        mul_num_invalid_r;
     reg        fcvtws_o_invalid_r;
     reg [31:0] o_fp_r;
     assign o_data      = o_fp_r;
-    assign o_invalid = (i_alu_ctrl == 5'b01010) ? sub_o_invalid_r :
-                       (i_alu_ctrl == 5'b01011) ? mul_o_invalid_r :
+    assign o_invalid = (i_alu_ctrl == 5'b01010) ? (sub_o_invalid_r || sub_num_invalid_r) :
+                       (i_alu_ctrl == 5'b01011) ? (mul_o_invalid_r || mul_num_invalid_r) :
                        (i_alu_ctrl == 5'b01100) ? fcvtws_o_invalid_r : 0;
 
     // =============================================== decoding ============================================ //
@@ -59,6 +61,10 @@ module fp_module (
 
     // ---------------- Mantissa Add/Sub ----------------
     always @(*) begin
+        sub_num_invalid_r = 0;
+        if (exp_a_w >= 8'hff || exp_b_w >= 8'hff) begin
+            sub_num_invalid_r = 1;
+        end
         if (sign_a_w == sign_b_eff_w) begin
             sub_man_sum_r = man_a_shift_w + man_b_shift_w;
             sub_sign_r    = sign_a_w;
@@ -205,13 +211,13 @@ module fp_module (
 
     // ========================================== MUL calculation ========================================= //
 
-    reg        mul_sign_r;
+    reg         mul_sign_r;
     reg  [9:0]  mul_exp_r;
     reg  [47:0] mul_man_raw_r;
     reg  [22:0] mul_man_rounded_r;
     reg  [7:0]  mul_exp_final_r;
     reg  [26:0] mul_man_norm_r;  // 24 bits mantissa + 3 bits GRS
-    wire [2:0] mul_grs_w = mul_man_norm_r[2:0];
+    wire [2:0]  mul_grs_w = mul_man_norm_r[2:0];
 
     always @(*) begin
         mul_sign_r         = 0;
@@ -221,7 +227,10 @@ module fp_module (
         mul_man_rounded_r  = 0;
         mul_o_invalid_r    = 0;
         mul_man_norm_r     = 0;
-        
+        mul_num_invalid_r  = 0;
+        if (exp_a_w == 8'hff || exp_b_w == 8'hff) begin
+            mul_num_invalid_r = 1;
+        end
         if ((~|exp_a_w && ~|man_a_w) || (~|exp_b_w && ~|man_b_w)) begin
             // Zero result
             mul_sign_r = 0;
@@ -321,7 +330,7 @@ module fp_module (
             fcvtws_o_invalid_r = 1;
             fcvtws_result_r = (man_a_w[22:0] != 23'd0) ? 32'sh7FFFFFFF : (sign_a_w ? 32'sh80000000 : 32'sh7FFFFFFF);
         end
-        else if (fcvtws_exp_w < 0) begin
+        else if (fcvtws_exp_w < -1) begin
             fcvtws_result_r = 0;
         end
         else if (fcvtws_exp_w > 30) begin
@@ -338,7 +347,7 @@ module fp_module (
                 sticky_r = 0;
                 shifted_r = mant_ext_r;
             end 
-            else if (shift_amt_r >= 56) begin
+            else if (shift_amt_r > 56) begin
                 guard_r = 0;
                 round_r = 0;
                 sticky_r = 0;

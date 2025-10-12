@@ -16,7 +16,7 @@ module fp_alu_tb;
     integer fail_count;
 
     // Instantiate DUT
-    fp_alu dut (
+    fp_module dut (
         .i_data_r1(i_data_a),
         .i_data_r2(i_data_b),
         .i_alu_ctrl(i_inst),
@@ -33,15 +33,6 @@ module fp_alu_tb;
             make_fp = {sign, exp, mant};
         end
     endfunction
-
-    // Helper function to display FP number
-    task display_fp;
-        input [31:0] fp;
-        begin
-            $display("  Sign=%b, Exp=%h (%d), Mant=%h", 
-                     fp[31], fp[30:23], fp[30:23], fp[22:0]);
-        end
-    endtask
 
     // Test verification task
     task verify_result;
@@ -69,7 +60,7 @@ module fp_alu_tb;
         fail_count = 0;
 
         $display("\n========================================");
-        $display("FP ALU Testbench Starting");
+        $display("FP ALU Comprehensive Testbench");
         $display("========================================\n");
 
         // ========================================
@@ -78,36 +69,58 @@ module fp_alu_tb;
         $display("\n--- Testing FSUB ---");
         i_inst = 5'b01010;
 
-        // Test 1: Simple subtraction 5.0 - 3.0 = 2.0
-        i_data_a = 32'h40A00000; // 5.0
-        i_data_b = 32'h40400000; // 3.0
-        #10;
+        // Basic arithmetic
+        i_data_a = 32'h40A00000; i_data_b = 32'h40400000; #10;
         verify_result(32'h40000000, 1'b0, "FSUB: 5.0 - 3.0 = 2.0");
 
-        // Test 2: Subtraction resulting in zero: 3.0 - 3.0 = 0.0
-        i_data_a = 32'h40400000; // 3.0
-        i_data_b = 32'h40400000; // 3.0
-        #10;
+        i_data_a = 32'h40400000; i_data_b = 32'h40400000; #10;
         verify_result(32'h00000000, 1'b0, "FSUB: 3.0 - 3.0 = 0.0");
 
-        // Test 3: Negative result: 2.0 - 5.0 = -3.0
-        i_data_a = 32'h40000000; // 2.0
-        i_data_b = 32'h40A00000; // 5.0
-        #10;
+        i_data_a = 32'h40000000; i_data_b = 32'h40A00000; #10;
         verify_result(32'hC0400000, 1'b0, "FSUB: 2.0 - 5.0 = -3.0");
 
-        // Test 4: Small difference
-        i_data_a = 32'h3F800001; // ~1.0000001
-        i_data_b = 32'h3F800000; // 1.0
-        #10;
-        verify_result(32'h34000000, 1'b0, "FSUB: ~1.0000001 - 1.0 = ~0.0000001");
-        $display("[INFO] FSUB: Small difference test - Result: %h", o_fp);
+        // Edge cases: very small differences
+        i_data_a = 32'h3F800001; i_data_b = 32'h3F800000; #10;
+        verify_result(32'h34000000, 1'b0, "FSUB: 1.0000001 - 1.0 = 2^-23");
 
-        // Test 5: Overflow case (large - (-large))
-        i_data_a = 32'h7F000000; // Large positive
-        i_data_b = 32'hFF000000; // Large negative
-        #10;
-        verify_result(32'h7F800000, 1'b1, "FSUB: Overflow to +Inf");
+        i_data_a = 32'h3F800010; i_data_b = 32'h3F800000; #10;
+        $display("[INFO] FSUB: 1+(16*2^-23) - 1.0 = %h", o_fp);
+
+        // Subnormal results
+        i_data_a = 32'h00800001; i_data_b = 32'h00800000; #10;
+        $display("[INFO] FSUB: Subnormal - Subnormal = %h", o_fp);
+
+        // Different exponents requiring alignment
+        i_data_a = 32'h41200000; i_data_b = 32'h3F800000; #10;
+        verify_result(32'h41100000, 1'b0, "FSUB: 10.0 - 1.0 = 9.0");
+
+        i_data_a = 32'h47800000; i_data_b = 32'h3F800000; #10;
+        verify_result(32'h477FFF00, 1'b0, "FSUB: 65536 - 1 = 65535");
+
+        // Catastrophic cancellation
+        i_data_a = 32'h3F800080; i_data_b = 32'h3F800000; #10;
+        $display("[INFO] FSUB: Cancellation test = %h", o_fp);
+
+        // Sign tests
+        i_data_a = 32'hC0000000; i_data_b = 32'hC0400000; #10;
+        verify_result(32'h3F800000, 1'b0, "FSUB: -2.0 - (-3.0) = 1.0");
+
+        i_data_a = 32'h40000000; i_data_b = 32'hC0000000; #10;
+        verify_result(32'h40800000, 1'b0, "FSUB: 2.0 - (-2.0) = 4.0");
+
+        // Overflow cases
+        i_data_a = 32'h7F000000; i_data_b = 32'hFF000000; #10;
+        verify_result(32'h7F800000, 1'b1, "FSUB: MAX - (-MAX) = +Inf (overflow)");
+
+        i_data_a = 32'h7F7FFFFF; i_data_b = 32'hBF800000; #10;
+        verify_result(32'h7F800000, 1'b1, "FSUB: MAX_FINITE - (-1.0) = +Inf");
+
+        // Special values
+        i_data_a = 32'h7F800000; i_data_b = 32'h3F800000; #10;
+        $display("[INFO] FSUB: +Inf - 1.0 = %h", o_fp);
+
+        i_data_a = 32'h7FC00000; i_data_b = 32'h3F800000; #10;
+        $display("[INFO] FSUB: NaN - 1.0 = %h", o_fp);
 
         // ========================================
         // FMUL Tests (i_inst = 5'b01011)
@@ -115,41 +128,63 @@ module fp_alu_tb;
         $display("\n--- Testing FMUL ---");
         i_inst = 5'b01011;
 
-        // Test 6: Simple multiplication 2.0 * 3.0 = 6.0
-        i_data_a = 32'h40000000; // 2.0
-        i_data_b = 32'h40400000; // 3.0
-        #10;
+        // Basic arithmetic
+        i_data_a = 32'h40000000; i_data_b = 32'h40400000; #10;
         verify_result(32'h40C00000, 1'b0, "FMUL: 2.0 * 3.0 = 6.0");
 
-        // Test 7: Multiply by zero
-        i_data_a = 32'h40000000; // 2.0
-        i_data_b = 32'h00000000; // 0.0
-        #10;
+        i_data_a = 32'h3F800000; i_data_b = 32'h3F800000; #10;
+        verify_result(32'h3F800000, 1'b0, "FMUL: 1.0 * 1.0 = 1.0");
+
+        i_data_a = 32'h40000000; i_data_b = 32'h00000000; #10;
         verify_result(32'h00000000, 1'b0, "FMUL: 2.0 * 0.0 = 0.0");
 
-        // Test 8: Multiply by one
-        i_data_a = 32'h40000000; // 2.0
-        i_data_b = 32'h3F800000; // 1.0
-        #10;
+        i_data_a = 32'h40000000; i_data_b = 32'h3F800000; #10;
         verify_result(32'h40000000, 1'b0, "FMUL: 2.0 * 1.0 = 2.0");
 
-        // Test 9: Negative multiplication
-        i_data_a = 32'hC0000000; // -2.0
-        i_data_b = 32'h40400000; // 3.0
-        #10;
+        // Sign combinations
+        i_data_a = 32'hC0000000; i_data_b = 32'h40400000; #10;
         verify_result(32'hC0C00000, 1'b0, "FMUL: -2.0 * 3.0 = -6.0");
 
-        // Test 10: Overflow
-        i_data_a = 32'h7F000000; // Large
-        i_data_b = 32'h7F000000; // Large
-        #10;
-        verify_result(32'h7F800000, 1'b1, "FMUL: Overflow to +Inf");
+        i_data_a = 32'hC0000000; i_data_b = 32'hC0400000; #10;
+        verify_result(32'h40C00000, 1'b0, "FMUL: -2.0 * -3.0 = 6.0");
 
-        // Test 11: Underflow
-        i_data_a = 32'h00800000; // Min normal
-        i_data_b = 32'h00800000; // Min normal
-        #10;
-        verify_result(32'h00000000, 1'b1, "FMUL: Underflow to 0");
+        i_data_a = 32'h40000000; i_data_b = 32'hC0400000; #10;
+        verify_result(32'hC0C00000, 1'b0, "FMUL: 2.0 * -3.0 = -6.0");
+
+        // Rounding tests (mantissa overflow)
+        i_data_a = 32'h3F7FFFFF; i_data_b = 32'h3F7FFFFF; #10;
+        $display("[INFO] FMUL: 0.999999 * 0.999999 = %h", o_fp);
+
+        i_data_a = 32'h3F800001; i_data_b = 32'h3F800001; #10;
+        $display("[INFO] FMUL: 1.0000001 * 1.0000001 = %h", o_fp);
+
+        // Small numbers
+        i_data_a = 32'h3F000000; i_data_b = 32'h3F000000; #10;
+        verify_result(32'h3E800000, 1'b0, "FMUL: 0.5 * 0.5 = 0.25");
+
+        i_data_a = 32'h3E800000; i_data_b = 32'h3E800000; #10;
+        verify_result(32'h3E000000, 1'b0, "FMUL: 0.25 * 0.25 = 0.0625");
+
+        // Overflow
+        i_data_a = 32'h7F000000; i_data_b = 32'h7F000000; #10;
+        verify_result(32'h7F800000, 1'b1, "FMUL: LARGE * LARGE = +Inf");
+
+        i_data_a = 32'h7F7FFFFF; i_data_b = 32'h40000000; #10;
+        verify_result(32'h7F800000, 1'b1, "FMUL: MAX_FINITE * 2.0 = +Inf");
+
+        // Underflow
+        i_data_a = 32'h00800000; i_data_b = 32'h00800000; #10;
+        verify_result(32'h00000000, 1'b1, "FMUL: MIN_NORMAL * MIN_NORMAL = 0");
+
+        i_data_a = 32'h00800000; i_data_b = 32'h3F000000; #10;
+        $display("[INFO] FMUL: MIN_NORMAL * 0.5 = %h (subnormal)", o_fp);
+
+        // Special values
+        i_data_a = 32'h7F800000; i_data_b = 32'h40000000; #10;
+        $display("[INFO] FMUL: +Inf * 2.0 = %h", o_fp);
+
+        i_data_a = 32'h7F800000; i_data_b = 32'h00000000; #10;
+        $display("[INFO] FMUL: +Inf * 0.0 = %h (NaN expected)", o_fp);
 
         // ========================================
         // FCVT.W.S Tests (i_inst = 5'b01100)
@@ -157,75 +192,128 @@ module fp_alu_tb;
         $display("\n--- Testing FCVT.W.S ---");
         i_inst = 5'b01100;
 
-        // Test 12: Convert 0.0
-        i_data_a = 32'h00000000; // 0.0
-        #10;
+        // Basic conversions
+        i_data_a = 32'h00000000; #10;
         verify_result(32'h00000000, 1'b0, "FCVT.W.S: 0.0 -> 0");
 
-        // Test 13: Convert 1.0
-        i_data_a = 32'h3F800000; // 1.0
-        #10;
+        i_data_a = 32'h3F800000; #10;
         verify_result(32'h00000001, 1'b0, "FCVT.W.S: 1.0 -> 1");
 
-        // Test 14: Convert -1.0
-        i_data_a = 32'hBF800000; // -1.0
-        #10;
+        i_data_a = 32'hBF800000; #10;
         verify_result(32'hFFFFFFFF, 1'b0, "FCVT.W.S: -1.0 -> -1");
 
-        // Test 15: Convert 42.0
-        i_data_a = 32'h42280000; // 42.0
-        #10;
+        i_data_a = 32'h42280000; #10;
         verify_result(32'h0000002A, 1'b0, "FCVT.W.S: 42.0 -> 42");
 
-        // Test 16: Convert -42.0
-        i_data_a = 32'hC2280000; // -42.0
-        #10;
+        i_data_a = 32'hC2280000; #10;
         verify_result(32'hFFFFFFD6, 1'b0, "FCVT.W.S: -42.0 -> -42");
 
-        // Test 17: Convert 0.5 (rounds to 0)
-        i_data_a = 32'h3F000000; // 0.5
-        #10;
-        verify_result(32'h00000000, 1'b0, "FCVT.W.S: 0.5 -> 0");
+        // Powers of 2
+        i_data_a = 32'h40000000; #10;
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 2.0 -> 2");
 
-        // Test 18: Convert 1.5 (rounds to 2, nearest even)
-        i_data_a = 32'h3FC00000; // 1.5
-        #10;
-        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 1.5 -> 2");
+        i_data_a = 32'h41000000; #10;
+        verify_result(32'h00000008, 1'b0, "FCVT.W.S: 8.0 -> 8");
 
-        // Test 19: Convert 2.5 (rounds to 2, nearest even)
-        i_data_a = 32'h40200000; // 2.5
-        #10;
-        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 2.5 -> 2");
+        i_data_a = 32'h43800000; #10;
+        verify_result(32'h00000100, 1'b0, "FCVT.W.S: 256.0 -> 256");
 
-        // Test 20: Convert +Inf
-        i_data_a = 32'h7F800000; // +Inf
-        #10;
+        i_data_a = 32'h47800000; #10;
+        verify_result(32'h00010000, 1'b0, "FCVT.W.S: 65536.0 -> 65536");
+
+        // Rounding: Round to nearest even
+        i_data_a = 32'h3F000000; #10;
+        verify_result(32'h00000000, 1'b0, "FCVT.W.S: 0.5 -> 0 (round to even)");
+
+        i_data_a = 32'h3FC00000; #10;
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 1.5 -> 2 (round to even)");
+
+        i_data_a = 32'h40200000; #10;
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 2.5 -> 2 (round to even)");
+
+        i_data_a = 32'h40600000; #10;
+        verify_result(32'h00000004, 1'b0, "FCVT.W.S: 3.5 -> 4 (round to even)");
+
+        i_data_a = 32'h40A00000; #10;
+        verify_result(32'h00000004, 1'b0, "FCVT.W.S: 4.5 -> 4 (round to even)");
+
+        i_data_a = 32'h40E00000; #10;
+        verify_result(32'h00000006, 1'b0, "FCVT.W.S: 5.5 -> 6 (round to even)");
+
+        // Fractional rounding
+        i_data_a = 32'h3F8CCCCD; #10; // 1.1
+        verify_result(32'h00000001, 1'b0, "FCVT.W.S: 1.1 -> 1");
+
+        i_data_a = 32'h40066666; #10; // 2.1
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 2.1 -> 2");
+
+        i_data_a = 32'h3FE66666; #10; // 1.8
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 1.8 -> 2");
+
+        i_data_a = 32'h4015C28F; #10; // 2.34
+        verify_result(32'h00000002, 1'b0, "FCVT.W.S: 2.34 -> 2");
+
+        i_data_a = 32'h40266666; #10; // 2.6
+        verify_result(32'h00000003, 1'b0, "FCVT.W.S: 2.6 -> 3");
+
+        // Negative rounding
+        i_data_a = 32'hBF000000; #10;
+        verify_result(32'h00000000, 1'b0, "FCVT.W.S: -0.5 -> 0 (round to even)");
+
+        i_data_a = 32'hBFC00000; #10;
+        verify_result(32'hFFFFFFFE, 1'b0, "FCVT.W.S: -1.5 -> -2 (round to even)");
+
+        i_data_a = 32'hC0200000; #10;
+        verify_result(32'hFFFFFFFE, 1'b0, "FCVT.W.S: -2.5 -> -2 (round to even)");
+
+        i_data_a = 32'hBF8CCCCD; #10;
+        verify_result(32'hFFFFFFFF, 1'b0, "FCVT.W.S: -1.1 -> -1");
+
+        i_data_a = 32'hBFE66666; #10;
+        verify_result(32'hFFFFFFFE, 1'b0, "FCVT.W.S: -1.8 -> -2");
+
+        // Large values
+        i_data_a = 32'h4B7FFFFF; #10; // 16777215
+        verify_result(32'h00FFFFFF, 1'b0, "FCVT.W.S: 16777215.0 -> 16777215");
+
+        i_data_a = 32'h4CFFFFFF; #10; // Large but within range
+        $display("[INFO] FCVT.W.S: Large value = %h", o_fp);
+
+        // Boundary cases
+        i_data_a = 32'h4EFFFFFF; #10; // Close to 2^31-1
+        $display("[INFO] FCVT.W.S: Near MAX_INT = %h", o_fp);
+
+        i_data_a = 32'h4F000000; #10; // 2^31
+        verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: 2^31 -> MAX_INT (overflow)");
+
+        i_data_a = 32'hCF000000; #10; // -2^31
+        verify_result(32'h80000000, 1'b0, "FCVT.W.S: -2^31 -> MIN_INT");
+
+        i_data_a = 32'hCF000001; #10; // Slightly less than -2^31
+        verify_result(32'h80000000, 1'b1, "FCVT.W.S: < -2^31 -> MIN_INT (overflow)");
+
+        // Special values
+        i_data_a = 32'h7F800000; #10;
         verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: +Inf -> MAX_INT");
 
-        // Test 21: Convert -Inf
-        i_data_a = 32'hFF800000; // -Inf
-        #10;
+        i_data_a = 32'hFF800000; #10;
         verify_result(32'h80000000, 1'b1, "FCVT.W.S: -Inf -> MIN_INT");
 
-        // Test 22: Convert NaN
-        i_data_a = 32'h7FC00000; // NaN
-        #10;
-        verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: NaN -> MAX_INT");
+        i_data_a = 32'h7FC00000; #10;
+        verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: qNaN -> MAX_INT");
 
-        // Test 23: Convert large positive (overflow)
-        i_data_a = 32'h4F800000; // 2^32
-        #10;
-        verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: Overflow -> MAX_INT");
+        i_data_a = 32'h7F800001; #10;
+        verify_result(32'h7FFFFFFF, 1'b1, "FCVT.W.S: sNaN -> MAX_INT");
 
-        // Test 24: Convert large negative (overflow)
-        i_data_a = 32'hCF800000; // -2^32
-        #10;
-        verify_result(32'h80000000, 1'b1, "FCVT.W.S: Negative overflow -> MIN_INT");
+        // Very small values
+        i_data_a = 32'h3F7FFFFF; #10; // 0.99999...
+        verify_result(32'h00000001, 1'b0, "FCVT.W.S: 0.99999 -> 1");
 
-        // Test 25: Convert max representable int (2^31-1 ~ 2147483647)
-        i_data_a = 32'h4EFFFFFF; // ~2^31-1
-        #10;
-        $display("[INFO] FCVT.W.S: Max int conversion - Result: %h", o_fp);
+        i_data_a = 32'h3F000001; #10; // Slightly > 0.5
+        verify_result(32'h00000001, 1'b0, "FCVT.W.S: 0.5+ -> 1");
+
+        i_data_a = 32'h3EFFFFFF; #10; // Slightly < 0.5
+        verify_result(32'h00000000, 1'b0, "FCVT.W.S: 0.5- -> 0");
 
         // ========================================
         // FCLASS Tests (i_inst = 5'b01111)
@@ -233,55 +321,48 @@ module fp_alu_tb;
         $display("\n--- Testing FCLASS ---");
         i_inst = 5'b01111;
 
-        // Test 26: Classify -Inf
-        i_data_a = 32'hFF800000; // -Inf
-        #10;
+        i_data_a = 32'hFF800000; #10;
         verify_result(32'h00000001, 1'b0, "FCLASS: -Inf -> 0x1");
 
-        // Test 27: Classify -Normal
-        i_data_a = 32'hC0000000; // -2.0
-        #10;
-        verify_result(32'h00000002, 1'b0, "FCLASS: -Normal -> 0x2");
+        i_data_a = 32'hC0000000; #10;
+        verify_result(32'h00000002, 1'b0, "FCLASS: -2.0 (Normal) -> 0x2");
 
-        // Test 28: Classify -Subnormal
-        i_data_a = 32'h80000001; // -Subnormal
-        #10;
+        i_data_a = 32'h80000001; #10;
         verify_result(32'h00000004, 1'b0, "FCLASS: -Subnormal -> 0x4");
 
-        // Test 29: Classify -Zero
-        i_data_a = 32'h80000000; // -0
-        #10;
+        i_data_a = 32'h80000000; #10;
         verify_result(32'h00000008, 1'b0, "FCLASS: -Zero -> 0x8");
 
-        // Test 30: Classify +Zero
-        i_data_a = 32'h00000000; // +0
-        #10;
+        i_data_a = 32'h00000000; #10;
         verify_result(32'h00000010, 1'b0, "FCLASS: +Zero -> 0x10");
 
-        // Test 31: Classify +Subnormal
-        i_data_a = 32'h00000001; // +Subnormal
-        #10;
+        i_data_a = 32'h00000001; #10;
         verify_result(32'h00000020, 1'b0, "FCLASS: +Subnormal -> 0x20");
 
-        // Test 32: Classify +Normal
-        i_data_a = 32'h40000000; // 2.0
-        #10;
-        verify_result(32'h00000040, 1'b0, "FCLASS: +Normal -> 0x40");
+        i_data_a = 32'h40000000; #10;
+        verify_result(32'h00000040, 1'b0, "FCLASS: +2.0 (Normal) -> 0x40");
 
-        // Test 33: Classify +Inf
-        i_data_a = 32'h7F800000; // +Inf
-        #10;
+        i_data_a = 32'h7F800000; #10;
         verify_result(32'h00000080, 1'b0, "FCLASS: +Inf -> 0x80");
 
-        // Test 34: Classify Signaling NaN
-        i_data_a = 32'h7F800001; // sNaN
-        #10;
+        i_data_a = 32'h7F800001; #10;
         verify_result(32'h00000100, 1'b0, "FCLASS: sNaN -> 0x100");
 
-        // Test 35: Classify Quiet NaN
-        i_data_a = 32'h7FC00000; // qNaN
-        #10;
+        i_data_a = 32'h7FC00000; #10;
         verify_result(32'h00000200, 1'b0, "FCLASS: qNaN -> 0x200");
+
+        // Additional edge cases
+        i_data_a = 32'h007FFFFF; #10; // Max subnormal
+        verify_result(32'h00000020, 1'b0, "FCLASS: Max +Subnormal -> 0x20");
+
+        i_data_a = 32'h807FFFFF; #10; // Max negative subnormal
+        verify_result(32'h00000004, 1'b0, "FCLASS: Max -Subnormal -> 0x4");
+
+        i_data_a = 32'h00800000; #10; // Min normal
+        verify_result(32'h00000040, 1'b0, "FCLASS: Min +Normal -> 0x40");
+
+        i_data_a = 32'h7F7FFFFF; #10; // Max finite
+        verify_result(32'h00000040, 1'b0, "FCLASS: Max +Normal -> 0x40");
 
         // ========================================
         // Summary
@@ -293,12 +374,13 @@ module fp_alu_tb;
         $display("Total Tests: %0d", test_count);
         $display("Passed:      %0d", pass_count);
         $display("Failed:      %0d", fail_count);
+        $display("Pass Rate:   %.2f%%", (pass_count * 100.0) / test_count);
         $display("========================================\n");
 
         if (fail_count == 0)
             $display("*** ALL TESTS PASSED ***\n");
         else
-            $display("*** SOME TESTS FAILED ***\n");
+            $display("*** %0d TESTS FAILED ***\n", fail_count);
 
         $finish;
     end
