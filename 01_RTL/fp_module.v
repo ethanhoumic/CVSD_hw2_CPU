@@ -50,14 +50,14 @@ module fp_module (
     wire [7:0]  exp_large_w    = (exp_a_w >= exp_b_w) ? exp_a_w : exp_b_w;
 
     // Padded mantissas with guard, round, and sticky bits
-    wire [26:0] man_a_padded   = {man_a_w, 3'b0}; // 27 bits (24 + 3 for GRS)
-    wire [26:0] man_b_padded   = {man_b_w, 3'b0}; // 27 bits
+    wire [326:0] man_a_padded   = {man_a_w, 303'b0}; // 327 bits (24 + 3 for GRS + 300)
+    wire [326:0] man_b_padded   = {man_b_w, 303'b0}; // 27 bits
 
-    wire [26:0] man_a_shift_w  = (exp_a_w >= exp_b_w) ? man_a_padded : (man_a_padded >> exp_diff_w);
-    wire [26:0] man_b_shift_w  = (exp_b_w >  exp_a_w) ? man_b_padded : (man_b_padded >> exp_diff_w);
+    wire [326:0] man_a_shift_w  = (exp_a_w >= exp_b_w) ? man_a_padded : (man_a_padded >> exp_diff_w);
+    wire [326:0] man_b_shift_w  = (exp_b_w >  exp_a_w) ? man_b_padded : (man_b_padded >> exp_diff_w);
 
-    reg  [27:0] sub_man_sum_r;
-    reg         sub_sign_r;
+    reg  [327:0] sub_man_sum_r;
+    reg          sub_sign_r;
 
     // ---------------- Mantissa Add/Sub ----------------
     always @(*) begin
@@ -80,74 +80,49 @@ module fp_module (
     end
 
     // ---------------- Normalization ----------------
-    reg [7:0]  sub_exp_temp;
+    reg [8:0]  sub_exp_temp;
     reg [7:0]  sub_exp_r;
-    reg [26:0] sub_man_temp;
-    reg [26:0] sub_man_norm_r;
-    reg [7:0]  shift_amount_r;
+    reg [326:0] sub_man_temp;
+    reg [326:0] sub_man_norm_r;
+    reg [8:0]  shift_amount_r;
 
     always @(*) begin
         sub_exp_r = 0;
         sub_man_norm_r = 0;
-        sub_exp_temp   = exp_large_w;
-        sub_man_temp   = sub_man_sum_r[26:0];
+        sub_exp_temp   = {1'b0, exp_large_w};
+        sub_man_temp   = sub_man_sum_r[326:0];
         shift_amount_r   = 0;
 
         // Check for zero result first
-        if (sub_man_sum_r == 28'd0) begin
-            sub_exp_temp = 8'd0;
-            sub_man_temp = 27'd0;
+        if (sub_man_sum_r == 328'd0) begin
+            sub_exp_temp = 9'd0;
+            sub_man_temp = 327'd0;
         end
         // Normalize right (overflow from addition)
-        else if (sub_man_sum_r[27]) begin
-            sub_man_temp = sub_man_sum_r[27:1]; // Shift right by 1
+        else if (sub_man_sum_r[327]) begin
+            sub_man_temp = sub_man_sum_r[327:1]; // Shift right by 1
             sub_exp_temp = sub_exp_temp + 1;
         end
         // Normalize left (result has leading zeros)
-        else if (sub_man_sum_r[26] == 0) begin
+        else if (sub_man_sum_r[326] == 0) begin
             // Find leading 1
-            if (sub_man_temp[25])      shift_amount_r = 1;
-            else if (sub_man_temp[24]) shift_amount_r = 2;
-            else if (sub_man_temp[23]) shift_amount_r = 3;
-            else if (sub_man_temp[22]) shift_amount_r = 4;
-            else if (sub_man_temp[21]) shift_amount_r = 5;
-            else if (sub_man_temp[20]) shift_amount_r = 6;
-            else if (sub_man_temp[19]) shift_amount_r = 7;
-            else if (sub_man_temp[18]) shift_amount_r = 8;
-            else if (sub_man_temp[17]) shift_amount_r = 9;
-            else if (sub_man_temp[16]) shift_amount_r = 10;
-            else if (sub_man_temp[15]) shift_amount_r = 11;
-            else if (sub_man_temp[14]) shift_amount_r = 12;
-            else if (sub_man_temp[13]) shift_amount_r = 13;
-            else if (sub_man_temp[12]) shift_amount_r = 14;
-            else if (sub_man_temp[11]) shift_amount_r = 15;
-            else if (sub_man_temp[10]) shift_amount_r = 16;
-            else if (sub_man_temp[9])  shift_amount_r = 17;
-            else if (sub_man_temp[8])  shift_amount_r = 18;
-            else if (sub_man_temp[7])  shift_amount_r = 19;
-            else if (sub_man_temp[6])  shift_amount_r = 20;
-            else if (sub_man_temp[5])  shift_amount_r = 21;
-            else if (sub_man_temp[4])  shift_amount_r = 22;
-            else if (sub_man_temp[3])  shift_amount_r = 23;
-            else if (sub_man_temp[2])  shift_amount_r = 24;
-            else if (sub_man_temp[1])  shift_amount_r = 25;
-            else if (sub_man_temp[0])  shift_amount_r = 26;
-            else shift_amount_r = 27;
+            shift_amount_r = flo(sub_man_sum_r);
             
             sub_man_temp = sub_man_temp << shift_amount_r;
             sub_exp_temp = sub_exp_temp - shift_amount_r;
         end
 
         sub_man_norm_r = sub_man_temp;
-        sub_exp_r      = sub_exp_temp;
+        sub_exp_r      = sub_exp_temp[7:0];
     end
 
     // ---------------- Guard/Round/Sticky bits ----------------
     // After normalization, sub_man_norm_r has format: [26:24]=integer+mantissa, [2:0]=GRS bits
-    wire [3:0] sub_grs_w = sub_man_norm_r[2:0];  // Get lower 3 bits for rounding
+    wire       sub_sticky_w = |sub_man_norm_r[301:0];
+    wire [3:0] sub_grs_w = {sub_man_norm_r[303:302], sub_sticky_w};  // Get lower 3 bits for rounding
 
     // ---------------- Exception Detection & Rounding ----------------
-    reg [22:0] sub_man_rounded_r;
+    reg [23:0] sub_man_rounded_r;
     reg [7:0]  sub_exp_final_r;
 
     always @(*) begin
@@ -156,14 +131,14 @@ module fp_module (
         if (sub_exp_r >= 8'hFF) begin
             // Overflow -> Inf
             sub_exp_final_r   = 8'hFF;
-            sub_man_rounded_r = 23'd0;
+            sub_man_rounded_r = 24'd0;
             sub_o_invalid_r   = 1'b1;
         end
         else if ($signed({1'b0, sub_exp_r}) <= 0) begin
             // Underflow -> zero/subnormal
             if (sub_man_norm_r != 0) begin
                 sub_exp_final_r   = 8'h00;
-                sub_man_rounded_r = 23'd0;
+                sub_man_rounded_r = 24'd0;
                 sub_o_invalid_r   = 1'b1;
             end
             else begin
@@ -174,7 +149,7 @@ module fp_module (
         else begin
             // No exception → rounding using verified logic
             sub_exp_final_r   = sub_exp_r;
-            sub_man_rounded_r = sub_man_norm_r[25:3]; // Extract 23-bit mantissa
+            sub_man_rounded_r = {1'b0, sub_man_norm_r[325:303]}; // Extract 23-bit mantissa
             
             // Verified rounding logic: check GRS bits
             // GRS format: [2]=Guard, [1]=Round, [0]=Sticky
@@ -192,22 +167,39 @@ module fp_module (
 
             // Check for mantissa overflow after rounding
             if (sub_man_rounded_r == 23'h7FFFFF + 1) begin
-                sub_man_rounded_r = 23'd0;
+                sub_man_rounded_r = 24'd0;
                 sub_exp_final_r   = sub_exp_final_r + 1;
 
                 if (sub_exp_final_r >= 8'hFF) begin
                     sub_exp_final_r   = 8'hFF;
-                    sub_man_rounded_r = 23'd0;
+                    sub_man_rounded_r = 24'd0;
                     sub_o_invalid_r   = 1'b1;
                 end
             end
         end
     end
 
+    function automatic [8:0] flo;
+        input [327:0] i_data;
+        reg stop;
+        integer i;
+        begin
+            stop = 0;
+            flo = 1;
+            for (i = 325; i >= 0; i = i - 1) begin
+                if (!stop) begin
+                    if (!i_data[i]) flo = flo + 1;
+                    else stop = 1;
+                end
+            end
+        end
+        
+    endfunction
+
     // ---------------- Output (packed) ----------------
     assign sub_result_w = (sub_exp_final_r == 0 && sub_man_rounded_r == 0) ? 
                           32'h00000000 : // Force +0 for zero result
-                          {sub_sign_r, sub_exp_final_r, sub_man_rounded_r};
+                          {sub_sign_r, sub_exp_final_r, sub_man_rounded_r[22:0]};
 
     // ========================================== MUL calculation ========================================= //
 
