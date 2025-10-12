@@ -123,7 +123,7 @@ module core #( // DO NOT MODIFY INTERFACE!!!
         .o_invalid(invalid_w)
     );
 
-    fp_alu fp_alu(
+    fp_module fp_alu(
         .i_data_r1(rs1_data_w),
         .i_data_r2(rs2_data_w),
         .i_alu_ctrl(alu_ctrl_r),
@@ -141,8 +141,8 @@ module core #( // DO NOT MODIFY INTERFACE!!!
     assign o_wdata         = o_wdata_r;
     assign write_fp_en_w   = (state_r == S_PCGEN) && (type_r != 2) && (type_r != 3) && 
                            ((alu_ctrl_r == 5'b01010) || (alu_ctrl_r == 5'b01011) || (alu_ctrl_r == 5'b01101));
-    assign branch_target_w = pc_w + imm_w;
-    assign jalr_target_w   = alu_output_w & (~32'h1);
+    // assign branch_target_w = pc_w + imm_w;
+    // assign jalr_target_w   = alu_output_w & (~32'h1);
     assign write_en_w      = (state_r == S_PCGEN) && (type_r != 2) && (type_r != 3) && ~write_fp_en_w;
     assign o_status        = type_r;
     assign o_status_valid  = o_status_valid_r;
@@ -411,8 +411,9 @@ module control_unit (
         o_fp_2_en_r  = 0;
         o_imm_en_r   = 0;
         o_rd_addr_r  = 0;
+        o_type_r     = 0;
         case (i_op)
-            `OP_SUB, `OP_SLT, `OP_SRL: begin  // R type
+            `OP_SUB: begin  // R type, sub, slt, srl
                 case (i_funct3)
                     `FUNCT3_SUB: o_alu_ctrl_r = 5'b00000;
                     `FUNCT3_SLT: o_alu_ctrl_r = 5'b01000;
@@ -448,7 +449,7 @@ module control_unit (
                 o_rs2_addr_r = i_inst[24:20];
                 o_type_r     = 2;
             end
-            `OP_BEQ, `OP_BLT: begin
+            `OP_BEQ: begin     // bew, blt
                 if (i_funct3 == `FUNCT3_BEQ) o_alu_ctrl_r = 5'b00100;
                 else o_alu_ctrl_r = 5'b00101;
                 o_imm_en_r   = 0;
@@ -472,7 +473,7 @@ module control_unit (
                 o_rd_addr_r  = i_inst[11:7];
                 o_type_r     = 4;
             end
-            `OP_FSUB, `OP_FMUL, `OP_FCVTWS, `OP_FCLASS: begin
+            `OP_FSUB: begin     // fpp
                 case (i_funct7)
                     `FUNCT7_FSUB:   o_alu_ctrl_r = 5'b01010;
                     `FUNCT7_FMUL:   o_alu_ctrl_r = 5'b01011;
@@ -511,7 +512,10 @@ module control_unit (
                 o_alu_ctrl_r = 5'b10000;
                 o_type_r     = 6;
             end
-            default: o_alu_ctrl_r = 5'b11111; // error code
+            default: begin
+                o_alu_ctrl_r = 5'b11111; // error code
+                o_type_r     = 0;
+            end
         endcase
     end
 

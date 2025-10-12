@@ -307,9 +307,9 @@ module fp_module (
     reg                guard_r, round_r, sticky_r;
     reg         [63:0] rounded_r;
     reg  signed [31:0] fcvtws_result_r;
-    reg  signed [5:0]  shift_amt_r;
+    reg  signed [6:0]  shift_amt_r;
     wire signed [8:0]  fcvtws_exp_w = $signed({1'b0, exp_a_w}) - 127;
-    integer i;
+    integer shift_amt, i;
     assign fcvtws_result_w = fcvtws_result_r;
 
     always @(*) begin
@@ -330,8 +330,8 @@ module fp_module (
         end
         else begin
             mant_ext_r = {8'b0, 1'b1, man_a_w[22:0], 32'b0}; // 64 bits total
-            shift_amt_r = (55 - fcvtws_exp_w > 63) ? 0 : 55 - fcvtws_exp_w;
-
+            shift_amt_r = 55 - fcvtws_exp_w;
+            
             if (shift_amt_r <= 0) begin
                 guard_r = 0;
                 round_r = 0;
@@ -351,9 +351,7 @@ module fp_module (
                 
                 sticky_r = 0;
                 for (i = 0; i < 64; i = i + 1) begin
-                    if (i < shift_amt_r - 2) begin
-                        sticky_r = sticky_r | mant_ext_r[i];
-                    end
+                    if (i < shift_amt_r - 2) sticky_r = sticky_r | mant_ext_r[i];
                 end
             end
 
