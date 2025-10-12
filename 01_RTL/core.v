@@ -196,13 +196,19 @@ module core #( // DO NOT MODIFY INTERFACE!!!
             state_r <= next_state_r;
             case (state_r)
                 S_IDLE: begin
-                    o_we_r           <= 0;
-                    o_addr_r         <= pc_w;
-                    pc_gen_r         <= 0;
-                    o_status_valid_r <= 0;
+                    if (pc_w > 32'sd4095) begin
+                        type_r <= 5;
+                        o_status_valid_r <= 1;
+                    end
+                    else begin
+                        o_we_r           <= 0;
+                        o_addr_r         <= pc_w;
+                        pc_gen_r         <= 0;
+                        o_status_valid_r <= 0;
+                    end
                 end 
                 S_BUFF: begin
-                    
+
                 end
                 S_FETCH: begin
                     inst_r <= i_rdata;
@@ -227,13 +233,25 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     end
                     else begin
                         if (type_r == 2) begin
-                            o_we_r    <= 1;
-                            o_addr_r  <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
-                            o_wdata_r <= rs2_data_w;
+                            if ((read_fp_1_en_w && fp_alu_output_w < 32'sd4096) || (!read_fp_1_en_w && alu_output_w < 32'sd4096)) begin
+                                type_r <= 5;
+                                o_status_valid_r <= 1;
+                            end
+                            else begin
+                                o_we_r    <= 1;
+                                o_addr_r  <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
+                                o_wdata_r <= rs2_data_w;
+                            end
                         end
                         else if (is_load_w || is_fp_load_w) begin
-                            o_we_r   <= 0;
-                            o_addr_r <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
+                            if ((read_fp_1_en_w && fp_alu_output_w < 32'sd4096) || (!read_fp_1_en_w && alu_output_w < 32'sd4096)) begin
+                                type_r <= 5;
+                                o_status_valid_r <= 1;
+                            end
+                            else begin
+                                o_we_r   <= 0;
+                                o_addr_r <= (read_fp_1_en_w) ? fp_alu_output_w : alu_output_w;
+                            end
                         end
                     end
                 end
@@ -434,7 +452,7 @@ module control_unit (
                 if (i_funct3 == `FUNCT3_BEQ) o_alu_ctrl_r = 5'b00100;
                 else o_alu_ctrl_r = 5'b00101;
                 o_imm_en_r   = 0;
-                o_imm_r      = {{19{i_inst[31]}}, i_inst[7], i_inst[30:25], i_inst[11:8], 1'b0};
+                o_imm_r      = {{20{i_inst[31]}}, i_inst[7], i_inst[30:25], i_inst[11:8], 1'b0};
                 o_rs1_addr_r = i_inst[19:15];
                 o_rs2_addr_r = i_inst[24:20];
                 o_type_r     = 3;
