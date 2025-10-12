@@ -365,16 +365,12 @@ module fp_module (
             end
 
             // Round to nearest even using verified logic
-            if ({guard_r, round_r, sticky_r} > 3'b100) begin
-                rounded_r = shifted_r + 1;
-            end
+            if ({guard_r, round_r, sticky_r} > 3'b100) rounded_r = shifted_r + 1;
             else if ({guard_r, round_r, sticky_r} == 3'b100) begin
                 if (shifted_r[0]) rounded_r = shifted_r + 1;
                 else rounded_r = shifted_r;
             end
-            else begin
-                rounded_r = shifted_r;
-            end
+            else rounded_r = shifted_r;
 
             // Convert to signed integer and check overflow
             if (sign_a_w) begin
@@ -382,18 +378,14 @@ module fp_module (
                     fcvtws_o_invalid_r = 1;
                     fcvtws_result_r = 32'sh80000000;
                 end
-                else begin
-                    fcvtws_result_r = -$signed(rounded_r[31:0]);
-                end
+                else fcvtws_result_r = -$signed(rounded_r[31:0]);
             end
             else begin
                 if (rounded_r[31]) begin
                     fcvtws_o_invalid_r = 1;
                     fcvtws_result_r = 32'sh7FFFFFFF;
                 end
-                else begin
-                    fcvtws_result_r = $signed(rounded_r[31:0]);
-                end
+                else fcvtws_result_r = $signed(rounded_r[31:0]);
             end
         end
     end

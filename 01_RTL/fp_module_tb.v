@@ -163,7 +163,7 @@ module fp_alu_tb;
         verify_result(32'h3E800000, 1'b0, "FMUL: 0.5 * 0.5 = 0.25");
 
         i_data_a = 32'h3E800000; i_data_b = 32'h3E800000; #10;
-        verify_result(32'h3E000000, 1'b0, "FMUL: 0.25 * 0.25 = 0.0625");
+        verify_result(32'h3D800000, 1'b0, "FMUL: 0.25 * 0.25 = 0.0625");
 
         // Overflow
         i_data_a = 32'h7F000000; i_data_b = 32'h7F000000; #10;
@@ -234,10 +234,10 @@ module fp_alu_tb;
         i_data_a = 32'h40600000; #10;
         verify_result(32'h00000004, 1'b0, "FCVT.W.S: 3.5 -> 4 (round to even)");
 
-        i_data_a = 32'h40A00000; #10;
+        i_data_a = 32'h40900000; #10;
         verify_result(32'h00000004, 1'b0, "FCVT.W.S: 4.5 -> 4 (round to even)");
 
-        i_data_a = 32'h40E00000; #10;
+        i_data_a = 32'h40B00000; #10;
         verify_result(32'h00000006, 1'b0, "FCVT.W.S: 5.5 -> 6 (round to even)");
 
         // Fractional rounding
