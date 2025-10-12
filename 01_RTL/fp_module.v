@@ -78,14 +78,14 @@ module fp_module (
     reg [7:0]  sub_exp_r;
     reg [26:0] sub_man_temp;
     reg [26:0] sub_man_norm_r;
-    integer    shift_amount;
+    reg [7:0]  shift_amount_r;
 
     always @(*) begin
         sub_exp_r = 0;
         sub_man_norm_r = 0;
         sub_exp_temp   = exp_large_w;
         sub_man_temp   = sub_man_sum_r[26:0];
-        shift_amount   = 0;
+        shift_amount_r   = 0;
 
         // Check for zero result first
         if (sub_man_sum_r == 28'd0) begin
@@ -100,36 +100,36 @@ module fp_module (
         // Normalize left (result has leading zeros)
         else if (sub_man_sum_r[26] == 0) begin
             // Find leading 1
-            if (sub_man_temp[25])      shift_amount = 1;
-            else if (sub_man_temp[24]) shift_amount = 2;
-            else if (sub_man_temp[23]) shift_amount = 3;
-            else if (sub_man_temp[22]) shift_amount = 4;
-            else if (sub_man_temp[21]) shift_amount = 5;
-            else if (sub_man_temp[20]) shift_amount = 6;
-            else if (sub_man_temp[19]) shift_amount = 7;
-            else if (sub_man_temp[18]) shift_amount = 8;
-            else if (sub_man_temp[17]) shift_amount = 9;
-            else if (sub_man_temp[16]) shift_amount = 10;
-            else if (sub_man_temp[15]) shift_amount = 11;
-            else if (sub_man_temp[14]) shift_amount = 12;
-            else if (sub_man_temp[13]) shift_amount = 13;
-            else if (sub_man_temp[12]) shift_amount = 14;
-            else if (sub_man_temp[11]) shift_amount = 15;
-            else if (sub_man_temp[10]) shift_amount = 16;
-            else if (sub_man_temp[9])  shift_amount = 17;
-            else if (sub_man_temp[8])  shift_amount = 18;
-            else if (sub_man_temp[7])  shift_amount = 19;
-            else if (sub_man_temp[6])  shift_amount = 20;
-            else if (sub_man_temp[5])  shift_amount = 21;
-            else if (sub_man_temp[4])  shift_amount = 22;
-            else if (sub_man_temp[3])  shift_amount = 23;
-            else if (sub_man_temp[2])  shift_amount = 24;
-            else if (sub_man_temp[1])  shift_amount = 25;
-            else if (sub_man_temp[0])  shift_amount = 26;
-            else shift_amount = 27;
+            if (sub_man_temp[25])      shift_amount_r = 1;
+            else if (sub_man_temp[24]) shift_amount_r = 2;
+            else if (sub_man_temp[23]) shift_amount_r = 3;
+            else if (sub_man_temp[22]) shift_amount_r = 4;
+            else if (sub_man_temp[21]) shift_amount_r = 5;
+            else if (sub_man_temp[20]) shift_amount_r = 6;
+            else if (sub_man_temp[19]) shift_amount_r = 7;
+            else if (sub_man_temp[18]) shift_amount_r = 8;
+            else if (sub_man_temp[17]) shift_amount_r = 9;
+            else if (sub_man_temp[16]) shift_amount_r = 10;
+            else if (sub_man_temp[15]) shift_amount_r = 11;
+            else if (sub_man_temp[14]) shift_amount_r = 12;
+            else if (sub_man_temp[13]) shift_amount_r = 13;
+            else if (sub_man_temp[12]) shift_amount_r = 14;
+            else if (sub_man_temp[11]) shift_amount_r = 15;
+            else if (sub_man_temp[10]) shift_amount_r = 16;
+            else if (sub_man_temp[9])  shift_amount_r = 17;
+            else if (sub_man_temp[8])  shift_amount_r = 18;
+            else if (sub_man_temp[7])  shift_amount_r = 19;
+            else if (sub_man_temp[6])  shift_amount_r = 20;
+            else if (sub_man_temp[5])  shift_amount_r = 21;
+            else if (sub_man_temp[4])  shift_amount_r = 22;
+            else if (sub_man_temp[3])  shift_amount_r = 23;
+            else if (sub_man_temp[2])  shift_amount_r = 24;
+            else if (sub_man_temp[1])  shift_amount_r = 25;
+            else if (sub_man_temp[0])  shift_amount_r = 26;
+            else shift_amount_r = 27;
             
-            sub_man_temp = sub_man_temp << shift_amount;
-            sub_exp_temp = sub_exp_temp - shift_amount;
+            sub_man_temp = sub_man_temp << shift_amount_r;
+            sub_exp_temp = sub_exp_temp - shift_amount_r;
         end
 
         sub_man_norm_r = sub_man_temp;
@@ -350,8 +350,10 @@ module fp_module (
                 round_r = (shift_amt_r > 1) ? mant_ext_r[shift_amt_r - 2] : 1'b0;
                 
                 sticky_r = 0;
-                for (i = 0; i < shift_amt_r - 2 && i < 64; i = i + 1) begin
-                    sticky_r = sticky_r | mant_ext_r[i];
+                for (i = 0; i < 64; i = i + 1) begin
+                    if (i < shift_amt_r - 2) begin
+                        sticky_r = sticky_r | mant_ext_r[i];
+                    end
                 end
             end
 
