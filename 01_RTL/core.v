@@ -259,6 +259,8 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                     o_we_r           <= 0;
                     o_status_valid_r <= 1;
                     pc_gen_r <= 1;
+                    branch_taken_r <= 0;
+                    jalr_taken_r <= 0;
                     // JALR stores PC+4
                     if (alu_ctrl_r == 5'b00110) begin
                         rd_data_r <= pc_w + 4;
@@ -277,12 +279,8 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                             branch_target_r <= pc_w + imm_w;
                         end
                     end
-                    else begin
-                        branch_taken_r <= 0;
-                    end
-                    
                     // JALR logic
-                    if (alu_ctrl_r == 5'b00110) begin
+                    else if (alu_ctrl_r == 5'b00110) begin
                         if (($signed(alu_output_r & (~32'h1)) > 32'sd4095) || $signed(alu_output_r & (~32'h1)) < 32'sd0) begin
                             type_r <= 5;
                         end
@@ -290,9 +288,6 @@ module core #( // DO NOT MODIFY INTERFACE!!!
                             jalr_taken_r  <= 1;
                             jalr_target_r <= alu_output_r & (~32'h1);
                         end
-                    end
-                    else begin
-                        jalr_taken_r <= 0;
                     end
                 end
                 S_PCGEN: begin
